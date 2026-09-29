@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Secrets - NEVER commit real credentials. Commit .env.example instead.
+.env
+.env.*
+!.env.example
+
+# Logs and runtime data
+logs/
+*.log
+npm-debug.log*
+
+# Private book files uploaded in development (added in step 5)
+storage/
+
+# Test / build output
+coverage/
+dist/
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
