@@ -6,6 +6,9 @@
  * reading `process.env` directly, so a missing setting fails fast at
  * startup with a clear message rather than deep inside a request.
  */
+import dns from "dns";
+dns.setServers(["8.8.8.8", "8.8.4.4", "1.1.1.1"]);
+dns.setDefaultResultOrder("ipv4first");
 import "dotenv/config";
 
 const REQUIRED = ["MONGODB_URI", "JWT_SECRET"];
@@ -22,6 +25,12 @@ if (process.env.JWT_SECRET.length < 32) {
   process.exit(1);
 }
 
+const SAME_SITE = (process.env.COOKIE_SAMESITE || "lax").toLowerCase();
+if (!["lax", "strict", "none"].includes(SAME_SITE)) {
+  console.error('COOKIE_SAMESITE must be "lax", "strict" or "none".');
+  process.exit(1);
+}
+
 export const env = {
   nodeEnv: process.env.NODE_ENV || "development",
   isProduction: process.env.NODE_ENV === "production",
@@ -30,6 +39,9 @@ export const env = {
   clientUrl: process.env.CLIENT_URL || "http://localhost:5173",
   jwtSecret: process.env.JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "7d",
+  // "lax" works when the site and API share a registrable domain (yourstore.com and
+  // api.yourstore.com). Use "none" only if they are on completely different domains.
+  cookieSameSite: SAME_SITE,
   adminEmail: process.env.ADMIN_EMAIL,
   adminPassword: process.env.ADMIN_PASSWORD,
 };

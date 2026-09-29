@@ -3,8 +3,8 @@
 REST API for the online bookstore, built with **Node.js, Express and MongoDB (Mongoose)**.
 It serves the catalogue, accounts, cart, and payments to the React app in `../client`.
 
-> **Status:** Step 1 of 6 - scaffold, data models, seed data. Auth, catalogue routes,
-> cart/checkout and the admin area are added in the following steps.
+> **Status:** Step 2 of 6 - scaffold, data models, seed data, and authentication.
+> Catalogue routes, cart/checkout and the admin area are added in the following steps.
 
 ## Requirements
 
@@ -37,6 +37,8 @@ Set these in `.env` (never commit that file). `.env.example` lists every option.
 | `CLIENT_URL` | no | Origin of the React app (CORS), default `http://localhost:5173` |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | no | Admin account created by the seed script |
 | `NODE_ENV` | no | `development` or `production` |
+| `COOKIE_SAMESITE` | no | `lax` (default), `strict` or `none`. See "Authentication" |
+| `DNS_SERVERS` | no | e.g. `8.8.8.8,1.1.1.1`. Only if your network blocks Atlas (`mongodb+srv`) DNS lookups |
 
 The server refuses to start if a required value is missing, and tells you which one.
 
@@ -64,13 +66,50 @@ server/
 │   │   ├── Book.js          digital titles, price in cents, text search index
 │   │   ├── User.js          customers and admins, hashed passwords, cart, library
 │   │   └── Order.js         checkout records and payment status
+│   ├── routes/
+│   │   └── auth.js          signup, login, logout, me
 │   ├── middleware/
+│   │   ├── auth.js          requireAuth / requireAdmin guards
 │   │   └── errorHandler.js  404 + consistent JSON errors
-│   ├── utils/ApiError.js    throw errors with an HTTP status
+│   ├── utils/
+│   │   ├── ApiError.js      throw errors with an HTTP status
+│   │   ├── asyncHandler.js  forwards async errors to the error handler
+│   │   └── token.js         sign/verify JWT, set/clear login cookie
 │   └── seed/seed.js         starter data
 ├── .env.example
 └── package.json
 ```
+
+## Authentication
+
+Login uses a signed JWT stored in an **httpOnly cookie** (JavaScript in the browser cannot read it).
+The React app never handles the token: the browser attaches the cookie to each request.
+
+| Method and path | Auth | Purpose |
+|---|---|---|
+| `POST /api/auth/signup` | public | Create account `{ name, email, password }`, signs in, returns `{ user }` |
+| `POST /api/auth/login` | public | Sign in `{ email, password }`, returns `{ user }` |
+| `POST /api/auth/logout` | public | Clears the cookie |
+| `GET /api/auth/me` | signed in | Returns the current `{ user }`, or 401 |
+
+Protect your own routes with the guards in `src/middleware/auth.js`:
+
+```js
+router.get("/orders", requireAuth, handler);                    // any signed-in user
+router.post("/books", requireAuth, requireAdmin, handler);      // admins only
+```
+
+Built-in protections:
+- Passwords: minimum 8 characters, stored as bcrypt hashes (cost 12), never returned.
+- Login and signup allow 10 failed attempts per 15 minutes per IP.
+- The same error ("Invalid email or password") is returned for unknown emails and wrong passwords.
+- Inputs must be strings, which blocks NoSQL operator injection.
+- The `role` field can never be set from the signup request. Admins come from the seed script.
+- Tokens are verified with a pinned algorithm (HS256) and the user is re-loaded on every request.
+
+**Cookies in production:** deploy the site and API on the same registrable domain
+(for example `yourstore.com` and `api.yourstore.com`) and keep `COOKIE_SAMESITE=lax`.
+Only use `none` if they must live on unrelated domains (it needs HTTPS and is less safe).
 
 ## How the store stays extensible
 

@@ -13,6 +13,7 @@ import mongoose from "mongoose";
 
 import { env } from "./config/env.js";
 import { notFound, errorHandler } from "./middleware/errorHandler.js";
+import authRoutes from "./routes/auth.js";
 
 const app = express();
 
@@ -34,7 +35,7 @@ app.use(cookieParser());
 if (!env.isProduction) app.use(morgan("dev"));
 
 // Basic abuse protection: 300 requests per 15 minutes per IP across the API.
-// Stricter limits for login/signup are added in step 2.
+// Login and signup have their own stricter limit (see routes/auth.js).
 app.use("/api", rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true, legacyHeaders: false }));
 
 // Health check: used by the React app, uptime monitors and hosting platforms.
@@ -47,7 +48,7 @@ app.get("/api/health", (req, res) => {
 });
 
 // --- Feature routes are mounted here as they are built ---
-// app.use("/api/auth", authRoutes);      (step 2)
+app.use("/api/auth", authRoutes);
 // app.use("/api/books", bookRoutes);     (step 3)
 // app.use("/api/cart", cartRoutes);      (step 4)
 

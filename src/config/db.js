@@ -1,6 +1,9 @@
 /**
  * MongoDB connection helpers (Mongoose).
  */
+import dns from "dns";
+dns.setServers(["8.8.8.8", "8.8.4.4", "1.1.1.1"]);
+dns.setDefaultResultOrder("ipv4first");
 import mongoose from "mongoose";
 import { env } from "./env.js";
 

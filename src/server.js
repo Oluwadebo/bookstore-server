@@ -2,6 +2,10 @@
  * Entry point: connects to MongoDB, then starts listening for requests.
  * Run with `npm run dev` (auto-restart) or `npm start` (production).
  */
+
+import dns from "dns";
+dns.setServers(["8.8.8.8", "8.8.4.4", "1.1.1.1"]);
+dns.setDefaultResultOrder("ipv4first");
 import { env } from "./config/env.js";
 import { connectDB, disconnectDB } from "./config/db.js";
 import app from "./app.js";
