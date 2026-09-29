@@ -14,6 +14,8 @@ import mongoose from "mongoose";
 import { env } from "./config/env.js";
 import { notFound, errorHandler } from "./middleware/errorHandler.js";
 import authRoutes from "./routes/auth.js";
+import bookRoutes from "./routes/books.js";
+import categoryRoutes from "./routes/categories.js";
 
 const app = express();
 
@@ -49,7 +51,8 @@ app.get("/api/health", (req, res) => {
 
 // --- Feature routes are mounted here as they are built ---
 app.use("/api/auth", authRoutes);
-// app.use("/api/books", bookRoutes);     (step 3)
+app.use("/api/books", bookRoutes);
+app.use("/api/categories", categoryRoutes);
 // app.use("/api/cart", cartRoutes);      (step 4)
 
 app.use(notFound);

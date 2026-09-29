@@ -3,8 +3,8 @@
 REST API for the online bookstore, built with **Node.js, Express and MongoDB (Mongoose)**.
 It serves the catalogue, accounts, cart, and payments to the React app in `../client`.
 
-> **Status:** Step 2 of 6 - scaffold, data models, seed data, and authentication.
-> Catalogue routes, cart/checkout and the admin area are added in the following steps.
+> **Status:** Step 3 of 6 - scaffold, models, seed data, authentication, and the catalogue API.
+> Cart/checkout and the admin area are added in the following steps.
 
 ## Requirements
 
@@ -67,7 +67,9 @@ server/
 │   │   ├── User.js          customers and admins, hashed passwords, cart, library
 │   │   └── Order.js         checkout records and payment status
 │   ├── routes/
-│   │   └── auth.js          signup, login, logout, me
+│   │   ├── auth.js          signup, login, logout, me
+│   │   ├── books.js         browse, keyword search, book detail
+│   │   └── categories.js    shelves with book counts
 │   ├── middleware/
 │   │   ├── auth.js          requireAuth / requireAdmin guards
 │   │   └── errorHandler.js  404 + consistent JSON errors
@@ -110,6 +112,34 @@ Built-in protections:
 **Cookies in production:** deploy the site and API on the same registrable domain
 (for example `yourstore.com` and `api.yourstore.com`) and keep `COOKIE_SAMESITE=lax`.
 Only use `none` if they must live on unrelated domains (it needs HTTPS and is less safe).
+
+## Catalogue API
+
+Public, read-only. Only published books are returned, and private file details never are.
+
+| Request | Purpose |
+|---|---|
+| `GET /api/books` | Browse and search (options below) |
+| `GET /api/books/:slug` | One book plus up to 4 related titles: `{ book, related }` |
+| `GET /api/categories` | All shelves with `bookCount`. Optional `?type=fiction` |
+| `GET /api/categories/:slug` | One shelf |
+
+Options for `GET /api/books`:
+
+| Option | Example | Meaning |
+|---|---|---|
+| `search` | `?search=sherlock` | Keywords, matched against title, author, tags, description |
+| `category` | `?category=fantasy` | A shelf slug (its sub-shelves are included) |
+| `type` | `?type=fiction` | `fiction`, `non-fiction` or `educational` |
+| `featured` | `?featured=true` | Featured books only |
+| `sort` | `?sort=price-asc` | `relevance` (search only), `newest`, `price-asc`, `price-desc`, `title` |
+| `page`, `limit` | `?page=2&limit=12` | Paging. `limit` is 1-48, default 12 |
+
+The response is `{ books, page, limit, total, totalPages }`.
+
+**How search works:** first MongoDB full-text search (ranked, title matches first). If that finds
+nothing, it falls back to partial matching so `holm` still finds "Sherlock Holmes". The text index is
+created automatically the first time the server or seed script connects.
 
 ## How the store stays extensible
 
