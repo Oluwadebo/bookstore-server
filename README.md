@@ -3,8 +3,8 @@
 REST API for the online bookstore, built with **Node.js, Express and MongoDB (Mongoose)**.
 It serves the catalogue, accounts, cart, and payments to the React app in `../client`.
 
-> **Status:** Step 3 of 6 - scaffold, models, seed data, authentication, and the catalogue API.
-> Cart/checkout and the admin area are added in the following steps.
+> **Status:** Step 4 of 6 - scaffold, models, seed data, authentication, catalogue, cart,
+> Paystack checkout, and the customer library with secure downloads. The admin area comes next.
 
 ## Requirements
 
@@ -38,6 +38,10 @@ Set these in `.env` (never commit that file). `.env.example` lists every option.
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | no | Admin account created by the seed script |
 | `NODE_ENV` | no | `development` or `production` |
 | `COOKIE_SAMESITE` | no | `lax` (default), `strict` or `none`. See "Authentication" |
+| `PAYMENT_PROVIDER` | no | `paystack` (default). See "Payments" |
+| `PAYSTACK_SECRET_KEY` | for checkout | Paystack secret key. `sk_test_...` for testing, `sk_live_...` only on the live server |
+| `STORE_CURRENCY` | no | Currency for new books and the seed data, e.g. `NGN` or `USD`. Default `USD` |
+| `STORAGE_DIR` | no | Private folder for book files, default `storage/books` |
 | `DNS_SERVERS` | no | e.g. `8.8.8.8,1.1.1.1`. Only if your network blocks Atlas (`mongodb+srv`) DNS lookups |
 
 The server refuses to start if a required value is missing, and tells you which one.
@@ -69,7 +73,15 @@ server/
 │   ├── routes/
 │   │   ├── auth.js          signup, login, logout, me
 │   │   ├── books.js         browse, keyword search, book detail
-│   │   └── categories.js    shelves with book counts
+│   │   ├── categories.js    shelves with book counts
+│   │   ├── cart.js          shopping cart (signed-in customers)
+│   │   ├── orders.js        checkout, payment verification, order history
+│   │   ├── payments.js      payment provider webhook
+│   │   ├── library.js       purchased books and download links
+│   │   └── downloads.js     expiring file downloads
+│   ├── payments/            gateway adapters (paystack.js): swap providers here
+│   ├── services/orders.js   turns confirmed payments into owned books
+│   ├── storage/index.js     private book-file storage (swap for S3 later)
 │   ├── middleware/
 │   │   ├── auth.js          requireAuth / requireAdmin guards
 │   │   └── errorHandler.js  404 + consistent JSON errors
@@ -140,6 +152,71 @@ The response is `{ books, page, limit, total, totalPages }`.
 **How search works:** first MongoDB full-text search (ranked, title matches first). If that finds
 nothing, it falls back to partial matching so `holm` still finds "Sherlock Holmes". The text index is
 created automatically the first time the server or seed script connects.
+
+## Cart, checkout and library API
+
+All of these need a signed-in customer (401 otherwise).
+
+| Request | Purpose |
+|---|---|
+| `GET /api/cart` | Current cart: `{ cart: { items, totalCents, currency, mixedCurrencies } }` |
+| `POST /api/cart` | Add `{ bookId }`, or merge `{ bookIds: [...] }` (used when a guest logs in) |
+| `DELETE /api/cart/:bookId` | Remove a book |
+| `POST /api/orders/checkout` | Create an order from the cart and start payment. Returns `{ url }` (payment page) or `{ free: true }` |
+| `GET /api/orders/verify?reference=` | Confirm a payment when the customer returns. Returns `{ status }` |
+| `GET /api/orders` | The customer's paid orders |
+| `GET /api/library` | Books the customer owns |
+| `POST /api/library/:bookId/link` | A download link valid for 5 minutes: `{ url }` |
+| `GET /api/downloads/:token` | The file itself (the token is the credential) |
+
+The browser never sends prices. Checkout rebuilds the order from the database, skips books the
+customer already owns, and refuses a cart that mixes currencies (one payment = one currency).
+
+## Payments (Paystack)
+
+Customers pay on Paystack's hosted page, so card details never touch this server.
+
+**The flow**
+1. `POST /api/orders/checkout` creates a `pending` order and asks Paystack for a payment page.
+2. The customer pays, and Paystack sends them back to `/checkout/complete`.
+3. The site calls `GET /api/orders/verify`, and the server asks Paystack whether it really succeeded.
+4. In parallel, Paystack calls `POST /api/payments/webhook` with a signed message.
+5. Whichever arrives first completes the order. The order is marked `paid` only if the **amount and
+   currency match**, then the books go into the customer's library. Doing it twice is harmless.
+
+**Set it up**
+1. Create a Paystack account and copy the **test** secret key from *Settings > API Keys & Webhooks*.
+2. Put it in `.env` as `PAYSTACK_SECRET_KEY=sk_test_...` and restart the server.
+3. Make sure `STORE_CURRENCY` is a currency your Paystack account supports. A Nigerian account uses
+   `NGN` by default (USD must be enabled by Paystack). Then run `npm run seed` to update the sample
+   books' currency and prices.
+4. Try a purchase using one of Paystack's test cards (see their docs; at the time of writing
+   `4084 0840 8408 4081`, any future expiry, CVV `408`, PIN `0000`, OTP `123456`).
+
+**Webhook (needed on the live site)**
+In the Paystack dashboard set the webhook URL to `https://YOUR-API-DOMAIN/api/payments/webhook`.
+Paystack cannot reach `localhost`, so on your own computer purchases are confirmed by the
+return-page check instead, which works fine for testing. The webhook matters in production
+because it delivers the books even if a customer closes the tab right after paying.
+
+**Going live:** switch `PAYSTACK_SECRET_KEY` to the live key on the live server only, and never put
+either key in the client or in Git.
+
+**Using another gateway:** copy `src/payments/paystack.js`, implement the same four members
+(`name`, `createCheckout`, `verifyPayment`, `parseWebhook`), register it in `src/payments/index.js`
+and set `PAYMENT_PROVIDER`. Nothing else changes.
+
+## Book files and downloads
+
+Files live in `STORAGE_DIR` (default `server/storage/books`), a **private** folder that is not served
+publicly and is excluded from Git. A customer downloads by asking for a link, which works for
+5 minutes, only for books they own, and is checked again when used.
+
+`npm run seed` creates a small **placeholder PDF** for each sample book so you can test downloads.
+Real files are uploaded through the admin area in step 5. For production, keep this folder on
+persistent storage (a mounted disk or volume). Free hosting tiers often wipe local files on every
+deploy, so cloud storage such as S3 or Cloudflare R2 is a better long-term fit: only
+`src/storage/index.js` and `src/routes/downloads.js` would change.
 
 ## How the store stays extensible
 

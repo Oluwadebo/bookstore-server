@@ -24,8 +24,9 @@ const orderSchema = new mongoose.Schema(
     totalCents: { type: Number, required: true, min: 0 },
     currency: { type: String, default: "USD", uppercase: true },
     status: { type: String, enum: ["pending", "paid", "failed", "refunded"], default: "pending", index: true },
-    // Which gateway handled it, and its id for this payment (used by the webhook).
-    provider: { type: String, default: "stripe" },
+    // Which gateway handled it ("paystack", or "free" for zero-priced carts) and its
+    // reference for this payment, used to match the provider's confirmation to the order.
+    provider: { type: String, default: "paystack" },
     providerRef: { type: String, index: true, sparse: true },
     paidAt: Date,
   },

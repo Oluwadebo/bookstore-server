@@ -2,19 +2,52 @@
  * Seed script: fills the database with starter shelves, sample books and an
  * admin account so the store has content while you develop.
  *
- *   npm run seed          add/update the sample data (safe to re-run)
+ *   npm run seed          add/update the sample data (safe to re-run). Prices and currency
+ *                         follow STORE_CURRENCY in .env, so change it and re-run to switch.
  *   npm run seed:fresh    wipe categories and books first, then seed
  *
  * The sample books are public-domain classics (Project Gutenberg), so they
  * are safe to use in demos. Replace them with your client's real catalogue
  * (only titles they hold the rights to sell) via the admin area in step 5.
  */
+import fs from "node:fs/promises";
 import slugify from "slugify";
 import { env } from "../config/env.js";
 import { connectDB, disconnectDB } from "../config/db.js";
 import { Category } from "../models/Category.js";
 import { Book } from "../models/Book.js";
 import { User } from "../models/User.js";
+
+/**
+ * Builds a tiny one-page PDF so the download flow can be tested end to end.
+ * These are PLACEHOLDERS, not the real books. Real files are uploaded in the admin area (step 5).
+ */
+function makePlaceholderPdf(title, author) {
+  const esc = (text) => text.replace(/[\\()]/g, "\\$&");
+  const stream = `BT /F1 22 Tf 72 700 Td (${esc(title)}) Tj /F1 14 Tf 0 -34 Td (by ${esc(author)}) Tj 0 -40 Td (Placeholder file for testing downloads.) Tj ET`;
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [];
+  objects.forEach((body, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${body}\nendobj\n`;
+  });
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  pdf += offsets.map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
+  return pdf;
+}
+
+// The sample prices below are written in US cents. For other store currencies they are
+// scaled to a sensible amount (for example NGN: 299 becomes 149500 kobo = N1,495).
+const PRICE_SCALE = { NGN: 500 };
 
 const CATEGORIES = [
   { name: "Fantasy", color: "#8E5CF7", description: "Magic, quests and impossible worlds." },
@@ -68,10 +101,26 @@ async function seed() {
     idByName[cat.name] = doc._id;
   }
 
+  // Placeholder book files live in the private storage folder (see STORAGE_DIR in .env).
+  await fs.mkdir(env.storageDir, { recursive: true });
+
   for (const { shelves, year, ...book } of BOOKS) {
+    const storageKey = `${slug(book.title)}.pdf`;
+    const pdf = makePlaceholderPdf(book.title, book.authors[0]);
+    await fs.writeFile(`${env.storageDir}/${storageKey}`, pdf);
+
     await Book.findOneAndUpdate(
       { slug: slug(book.title) },
-      { ...book, slug: slug(book.title), publishedYear: year, categories: shelves.map((s) => idByName[s]) },
+      {
+        ...book,
+        priceCents: Math.round(book.priceCents * (PRICE_SCALE[env.storeCurrency] ?? 1)),
+        currency: env.storeCurrency,
+        slug: slug(book.title),
+        publishedYear: year,
+        categories: shelves.map((s) => idByName[s]),
+        format: "pdf",
+        file: { storageKey, sizeBytes: Buffer.byteLength(pdf) },
+      },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
   }

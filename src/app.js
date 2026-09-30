@@ -16,6 +16,11 @@ import { notFound, errorHandler } from "./middleware/errorHandler.js";
 import authRoutes from "./routes/auth.js";
 import bookRoutes from "./routes/books.js";
 import categoryRoutes from "./routes/categories.js";
+import cartRoutes from "./routes/cart.js";
+import orderRoutes from "./routes/orders.js";
+import libraryRoutes from "./routes/library.js";
+import downloadRoutes from "./routes/downloads.js";
+import paymentRoutes from "./routes/payments.js";
 
 const app = express();
 
@@ -29,8 +34,9 @@ app.use(helmet());
 // login cookie travel with requests.
 app.use(cors({ origin: env.clientUrl, credentials: true }));
 
-// NOTE (step 4): Stripe's webhook needs the RAW request body, so that route
-// must be mounted BEFORE express.json() below.
+// Payment webhooks need the RAW request body to verify the provider's signature,
+// so this router is mounted BEFORE express.json() below.
+app.use("/api/payments", paymentRoutes);
 
 app.use(express.json({ limit: "10kb" })); // small limit: blocks oversized payloads
 app.use(cookieParser());
@@ -53,7 +59,10 @@ app.get("/api/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/books", bookRoutes);
 app.use("/api/categories", categoryRoutes);
-// app.use("/api/cart", cartRoutes);      (step 4)
+app.use("/api/cart", cartRoutes);
+app.use("/api/orders", orderRoutes);
+app.use("/api/library", libraryRoutes);
+app.use("/api/downloads", downloadRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

@@ -8,6 +8,7 @@
  */
 import mongoose from "mongoose";
 import slugify from "slugify";
+import { env } from "../config/env.js";
 
 const bookSchema = new mongoose.Schema(
   {
@@ -22,7 +23,8 @@ const bookSchema = new mongoose.Schema(
       min: [0, "Price cannot be negative"],
       validate: { validator: Number.isInteger, message: "priceCents must be a whole number" },
     },
-    currency: { type: String, default: "USD", uppercase: true, minlength: 3, maxlength: 3 },
+    // New books use STORE_CURRENCY from .env unless another currency is given.
+    currency: { type: String, default: () => env.storeCurrency, uppercase: true, minlength: 3, maxlength: 3 },
 
     coverUrl: { type: String, default: "" },
     // A book can sit on several shelves (e.g. Fantasy + Classics).

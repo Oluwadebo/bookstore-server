@@ -44,3 +44,24 @@ export function setAuthCookie(res, token) {
 export function clearAuthCookie(res) {
   res.clearCookie(COOKIE_NAME, cookieOptions());
 }
+
+/**
+ * Download links (step 4).
+ * A short-lived token proves "this user may download this book right now".
+ * It is signed with a DIFFERENT secret from login tokens, so a leaked download
+ * link can never be used as a login session.
+ */
+const downloadSecret = () => `${env.jwtSecret}:download`;
+
+/** Token valid for 5 minutes. */
+export function signDownloadToken(userId, bookId) {
+  return jwt.sign({ sub: String(userId), book: String(bookId) }, downloadSecret(), {
+    algorithm: "HS256",
+    expiresIn: "5m",
+  });
+}
+
+/** Throws if the token is invalid or expired. */
+export function verifyDownloadToken(token) {
+  return jwt.verify(token, downloadSecret(), { algorithms: ["HS256"] });
+}

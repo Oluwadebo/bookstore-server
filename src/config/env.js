@@ -10,6 +10,8 @@ import dns from "dns";
 dns.setServers(["8.8.8.8", "8.8.4.4", "1.1.1.1"]);
 dns.setDefaultResultOrder("ipv4first");
 import "dotenv/config";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const REQUIRED = ["MONGODB_URI", "JWT_SECRET"];
 const missing = REQUIRED.filter((key) => !process.env[key]);
@@ -31,6 +33,9 @@ if (!["lax", "strict", "none"].includes(SAME_SITE)) {
   process.exit(1);
 }
 
+// The server folder (two levels up from src/config), used to resolve relative paths.
+const SERVER_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
 export const env = {
   nodeEnv: process.env.NODE_ENV || "development",
   isProduction: process.env.NODE_ENV === "production",
@@ -42,6 +47,13 @@ export const env = {
   // "lax" works when the site and API share a registrable domain (yourstore.com and
   // api.yourstore.com). Use "none" only if they are on completely different domains.
   cookieSameSite: SAME_SITE,
+  // Payments (step 4)
+  paymentProvider: (process.env.PAYMENT_PROVIDER || "paystack").toLowerCase(),
+  paystackSecretKey: process.env.PAYSTACK_SECRET_KEY || "",
+  // Currency given to new books (ISO code such as NGN or USD).
+  storeCurrency: (process.env.STORE_CURRENCY || "USD").toUpperCase(),
+  // Private folder holding the sellable book files. Never served publicly.
+  storageDir: path.resolve(SERVER_ROOT, process.env.STORAGE_DIR || "storage/books"),
   adminEmail: process.env.ADMIN_EMAIL,
   adminPassword: process.env.ADMIN_PASSWORD,
 };
