@@ -2,7 +2,8 @@
  * Route guards.
  *
  *   router.get("/me", requireAuth, handler)                 signed-in users only
- *   router.post("/books", requireAuth, requireAdmin, ...)   admins only
+ *   router.post("/books", requireAuth, requireAdmin, ...)   admins (and the owner)
+ *   router.delete("/books/:id", requireAuth, requireOwner)  the site owner only
  *
  * requireAuth reads the login cookie, verifies it, loads the user from the
  * database (so deleted or demoted accounts lose access immediately) and
@@ -31,8 +32,14 @@ export const requireAuth = asyncHandler(async (req, res, next) => {
   next();
 });
 
-/** Use AFTER requireAuth. Blocks anyone who is not an admin. */
+/** Use AFTER requireAuth. Lets in admins and the owner; blocks everyone else. */
 export function requireAdmin(req, res, next) {
-  if (req.user?.role !== "admin") return next(new ApiError(403, "Admins only"));
+  if (!["admin", "owner"].includes(req.user?.role)) return next(new ApiError(403, "Admins only"));
+  next();
+}
+
+/** Use AFTER requireAuth. Only the site owner gets through: the top level of authority. */
+export function requireOwner(req, res, next) {
+  if (req.user?.role !== "owner") return next(new ApiError(403, "Only the site owner can do this"));
   next();
 }

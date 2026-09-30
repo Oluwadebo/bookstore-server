@@ -4,7 +4,7 @@
  *
  *   POST   /        create a shelf
  *   PATCH  /:id     change a shelf
- *   DELETE /:id     delete an empty shelf
+ *   DELETE /:id     delete an empty shelf (site owner only)
  *
  * This is how non-fiction or educational shelves are added later: create a shelf with
  * type "non-fiction" or "educational" and it appears across the site.
@@ -14,6 +14,7 @@ import { Router } from "express";
 import { Book } from "../models/Book.js";
 import { Category, CATEGORY_TYPES } from "../models/Category.js";
 import { ApiError } from "../utils/ApiError.js";
+import { requireOwner } from "../middleware/auth.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { isObjectId, strictText } from "../utils/validate.js";
 
@@ -98,6 +99,7 @@ router.patch(
 
 router.delete(
   "/:id",
+  requireOwner, // only the site owner can delete a shelf
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     if (!isObjectId(id) || !(await Category.exists({ _id: id }))) throw new ApiError(404, "Shelf not found");

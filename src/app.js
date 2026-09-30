@@ -22,6 +22,7 @@ import libraryRoutes from "./routes/library.js";
 import downloadRoutes from "./routes/downloads.js";
 import paymentRoutes from "./routes/payments.js";
 import adminRoutes from "./routes/admin.js";
+import adminRequestRoutes from "./routes/adminRequests.js";
 
 const app = express();
 
@@ -77,6 +78,7 @@ app.use("/api/orders", orderRoutes);
 app.use("/api/library", libraryRoutes);
 app.use("/api/downloads", downloadRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/admin-requests", adminRequestRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

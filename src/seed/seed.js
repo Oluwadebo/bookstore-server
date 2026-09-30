@@ -126,17 +126,26 @@ async function seed() {
   }
   console.log(`Seeded ${CATEGORIES.length} categories and ${BOOKS.length} books.`);
 
-  // Create the admin account once, using the values from .env.
+  // Create the SITE OWNER account once, using the values from .env.
+  // The owner is the top authority: they approve other admins and can delete books and shelves.
   if (env.adminEmail && env.adminPassword) {
-    const exists = await User.findOne({ email: env.adminEmail.toLowerCase() });
-    if (!exists) {
-      const admin = new User({ name: "Store Admin", email: env.adminEmail, role: "admin" });
-      await admin.setPassword(env.adminPassword);
-      await admin.save();
-      console.log(`Created admin account: ${env.adminEmail}`);
+    const existing = await User.findOne({ email: env.adminEmail.toLowerCase() });
+    const otherOwner = await User.findOne({ role: "owner", email: { $ne: env.adminEmail.toLowerCase() } });
+
+    if (!existing) {
+      const owner = new User({ name: "Store Owner", email: env.adminEmail, role: otherOwner ? "admin" : "owner" });
+      await owner.setPassword(env.adminPassword);
+      await owner.save();
+      console.log(`Created ${owner.role} account: ${env.adminEmail}`);
+    } else if (existing.role !== "owner" && !otherOwner) {
+      // Upgrade path: accounts created before owner roles existed were plain admins.
+      existing.role = "owner";
+      await existing.save();
+      console.log(`${env.adminEmail} is now the site owner.`);
     } else {
-      console.log("Admin account already exists, left unchanged.");
+      console.log("Owner/admin account already set up, left unchanged.");
     }
+    if (otherOwner) console.log(`Note: ${otherOwner.email} is already the owner. Use "npm run make-admin -- email --owner" to transfer ownership.`);
   }
 
   await disconnectDB();

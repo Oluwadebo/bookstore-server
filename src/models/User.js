@@ -21,7 +21,10 @@ const userSchema = new mongoose.Schema(
       match: [/^\S+@\S+\.\S+$/, "Enter a valid email address"],
     },
     passwordHash: { type: String, required: true, select: false },
-    role: { type: String, enum: ["user", "admin"], default: "user" },
+    // "owner" is the single site owner (top authority), "admin" is a staff member the owner
+    // approved, "user" is a normal customer. Roles are only ever changed on the server:
+    // by the owner's approval flow, or by the make-admin script. Never from a request body.
+    role: { type: String, enum: ["user", "admin", "owner"], default: "user" },
 
     // Books in the shopper's cart. Digital titles are bought once, so a cart
     // is just a list of book ids (no quantities needed).

@@ -4,7 +4,8 @@ REST API for the online bookstore, built with **Node.js, Express and MongoDB (Mo
 It serves the catalogue, accounts, cart, and payments to the React app in `../client`.
 
 > **Status:** Step 5 of 6 - everything a customer needs (catalogue, cart, Paystack checkout, library)
-> plus the admin area for managing books, files, shelves and orders. Final polish and hand-off come next.
+> plus the admin area (books, files, shelves, orders) with a site owner who approves other admins.
+> Final polish and hand-off come next.
 
 ## Requirements
 
@@ -57,7 +58,7 @@ The server refuses to start if a required value is missing, and tells you which 
 | `npm start` | Start normally (use this in production) |
 | `npm run seed` | Add or update sample data (safe to re-run) |
 | `npm run seed:fresh` | Delete categories and books, then seed again |
-| `npm run make-admin -- someone@example.com` | Make an existing customer an admin (add `--remove` to undo) |
+| `npm run make-admin -- someone@example.com` | Make an existing customer an admin. Add `--remove` to undo, or `--owner` to transfer ownership |
 
 ## Project structure
 
@@ -73,7 +74,8 @@ server/
 │   │   ├── Category.js      shelves (fiction / non-fiction / educational)
 │   │   ├── Book.js          digital titles, price in cents, text search index
 │   │   ├── User.js          customers and admins, hashed passwords, cart, library
-│   │   └── Order.js         checkout records and payment status
+│   │   ├── Order.js         checkout records and payment status
+│   │   └── AdminRequest.js  applications to become an admin
 │   ├── routes/
 │   │   ├── auth.js          signup, login, logout, me
 │   │   ├── books.js         browse, keyword search, book detail
@@ -85,7 +87,9 @@ server/
 │   │   ├── downloads.js     expiring file downloads
 │   │   ├── admin.js         admin guard, dashboard stats, orders
 │   │   ├── adminBooks.js    add/edit/delete books, upload files and covers
-│   │   └── adminCategories.js  add/edit/delete shelves
+│   │   ├── adminCategories.js  add/edit/delete shelves
+│   │   ├── adminTeam.js     owner-only: approve/decline applications, remove admins
+│   │   └── adminRequests.js customers apply to become an admin
 │   ├── payments/            gateway adapters (paystack.js): swap providers here
 │   ├── services/orders.js   turns confirmed payments into owned books
 │   ├── storage/
@@ -216,11 +220,33 @@ either key in the client or in Git.
 (`name`, `createCheckout`, `verifyPayment`, `parseWebhook`), register it in `src/payments/index.js`
 and set `PAYMENT_PROVIDER`. Nothing else changes.
 
+## Roles: owner, admins, customers
+
+| Role | Can do |
+|---|---|
+| **owner** (exactly one) | Everything. Has the final say. Approves or removes admins, and is the only one who can **delete** books and shelves |
+| **admin** | Add and edit books, upload files and covers, publish/unpublish, manage shelves, view orders |
+| **user** | Shop, and apply to become an admin |
+
+**How someone becomes an admin:** a customer clicks *Apply to be an admin* on their Account page
+(`POST /api/admin-requests`). Nothing is granted by applying. The owner sees the application on the
+**Team** screen and approves or declines it. Approved applicants get access on their very next
+request, and removed admins lose it just as quickly, because the role is read from the database on
+every request.
+
+Guard rails: one pending application per person, a 7-day wait after a decline, and at most 5 attempts
+per hour per IP. The owner cannot be removed through the website, there is only ever one owner, and
+an approval only ever promotes a plain customer (it can never change the owner's or an admin's role).
+
+**Creating the owner:** `npm run seed` creates the account from `ADMIN_EMAIL` / `ADMIN_PASSWORD` as the
+owner. An account created before roles existed can be upgraded with
+`npm run make-admin -- email --owner`. To hand the store to its real owner at delivery, have them
+sign up and run the same command with their email: they become the owner and the previous owner
+becomes a regular admin. Role changes outside the approval flow can only be made on the server.
+
 ## Admin API
 
-Everything under `/api/admin` needs a signed-in **admin** (visitors get 401, customers 403).
-Admins are created with `npm run seed` (from `ADMIN_EMAIL` / `ADMIN_PASSWORD`) or
-`npm run make-admin -- email`. Nobody can promote themselves through the website.
+Everything under `/api/admin` needs a signed-in **admin or owner** (visitors get 401, customers 403).
 
 | Request | Purpose |
 |---|---|
@@ -233,11 +259,16 @@ Admins are created with `npm run seed` (from `ADMIN_EMAIL` / `ADMIN_PASSWORD`) o
 | `DELETE /api/admin/books/:id` | Delete a book nobody has bought |
 | `POST /api/admin/books/:id/file` | Upload the book file (form field `file`, PDF or EPUB) |
 | `POST /api/admin/books/:id/cover` | Upload the cover (form field `cover`, JPEG/PNG/WebP, up to 2 MB) |
-| `POST/PATCH/DELETE /api/admin/categories[/:id]` | Manage shelves |
+| `POST/PATCH /api/admin/categories[/:id]` | Add and edit shelves |
+| `DELETE /api/admin/books/:id`, `DELETE /api/admin/categories/:id` | **Owner only** |
+| `GET /api/admin/team` | **Owner only.** Pending applications, the team, recent decisions |
+| `POST /api/admin/team/requests/:id/approve` or `/reject` | **Owner only** |
+| `POST /api/admin/team/admins/:userId/remove` | **Owner only.** Take admin access away |
+| `POST /api/admin-requests`, `GET/DELETE /api/admin-requests/mine` | Any signed-in customer: apply, check status, withdraw |
 
 **Rules that protect customers**
 - A book cannot be published until its file is uploaded, so nobody pays for something they can't receive.
-- A book that has been bought cannot be deleted (unpublish it instead). Owners keep their download
+- Only the owner can delete a book, and a book that has been bought cannot be deleted by anyone (unpublish it instead). Owners keep their download
   even after it is unpublished.
 - A shelf that still holds books cannot be deleted.
 

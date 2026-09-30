@@ -5,6 +5,7 @@
  *   GET /api/admin/stats     numbers for the dashboard
  *   GET /api/admin/orders    recent orders. ?status=paid|pending|failed|refunded ?page=
  *   ...books and shelves are handled by adminBooks.js and adminCategories.js
+ *   ...team management (who may be an admin) is owner-only: adminTeam.js
  */
 import { Router } from "express";
 import { Book } from "../models/Book.js";
@@ -16,17 +17,21 @@ import { cleanString, toInt } from "../utils/validate.js";
 import { requireAdmin, requireAuth } from "../middleware/auth.js";
 import adminBooks from "./adminBooks.js";
 import adminCategories from "./adminCategories.js";
+import adminTeam from "./adminTeam.js";
+import { AdminRequest } from "../models/AdminRequest.js";
 
 const router = Router();
 router.use(requireAuth, requireAdmin);
 
 router.use("/books", adminBooks);
 router.use("/categories", adminCategories);
+router.use("/team", adminTeam);
 
 router.get(
   "/stats",
   asyncHandler(async (req, res) => {
-    const [books, published, categories, customers, revenue] = await Promise.all([
+    const isOwner = req.user.role === "owner";
+    const [books, published, categories, customers, revenue, pendingAdminRequests] = await Promise.all([
       Book.countDocuments(),
       Book.countDocuments({ isPublished: true }),
       Category.countDocuments(),
@@ -37,6 +42,8 @@ router.get(
         { $group: { _id: "$currency", orders: { $sum: 1 }, revenueCents: { $sum: "$totalCents" } } },
         { $sort: { _id: 1 } },
       ]),
+      // Only the owner reviews applications, so only the owner sees the count.
+      isOwner ? AdminRequest.countDocuments({ status: "pending" }) : Promise.resolve(null),
     ]);
 
     res.json({
@@ -45,6 +52,7 @@ router.get(
       drafts: books - published,
       categories,
       customers,
+      pendingAdminRequests,
       revenue: revenue.map((row) => ({ currency: row._id, orders: row.orders, revenueCents: row.revenueCents })),
     });
   })

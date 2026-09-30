@@ -5,7 +5,7 @@
  *   GET    /:id             one book with all its details
  *   POST   /                create a book (starts as a draft)
  *   PATCH  /:id             change any of its details
- *   DELETE /:id             delete a book nobody owns
+ *   DELETE /:id             delete a book nobody owns (site owner only)
  *   POST   /:id/file        upload the sellable file (PDF or EPUB), field name "file"
  *   POST   /:id/cover       upload the cover image (JPEG/PNG/WebP), field name "cover"
  *
@@ -28,6 +28,7 @@ import { User } from "../models/User.js";
 import { moveFile, removeStoredFile } from "../storage/index.js";
 import { sniffBookFormat, sniffImage } from "../storage/fileTypes.js";
 import { ApiError } from "../utils/ApiError.js";
+import { requireOwner } from "../middleware/auth.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { cleanString, escapeRegex, isObjectId, strictText, toInt } from "../utils/validate.js";
 
@@ -228,6 +229,7 @@ router.patch(
 
 router.delete(
   "/:id",
+  requireOwner, // admins can unpublish; only the owner can delete
   asyncHandler(async (req, res) => {
     const book = await loadBook(req.params.id);
 
