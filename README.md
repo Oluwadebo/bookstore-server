@@ -3,8 +3,8 @@
 REST API for the online bookstore, built with **Node.js, Express and MongoDB (Mongoose)**.
 It serves the catalogue, accounts, cart, and payments to the React app in `../client`.
 
-> **Status:** Step 4 of 6 - scaffold, models, seed data, authentication, catalogue, cart,
-> Paystack checkout, and the customer library with secure downloads. The admin area comes next.
+> **Status:** Step 5 of 6 - everything a customer needs (catalogue, cart, Paystack checkout, library)
+> plus the admin area for managing books, files, shelves and orders. Final polish and hand-off come next.
 
 ## Requirements
 
@@ -42,6 +42,9 @@ Set these in `.env` (never commit that file). `.env.example` lists every option.
 | `PAYSTACK_SECRET_KEY` | for checkout | Paystack secret key. `sk_test_...` for testing, `sk_live_...` only on the live server |
 | `STORE_CURRENCY` | no | Currency for new books and the seed data, e.g. `NGN` or `USD`. Default `USD` |
 | `STORAGE_DIR` | no | Private folder for book files, default `storage/books` |
+| `COVERS_DIR` | no | Public cover images, default `storage/covers` (served at `/api/covers`) |
+| `TMP_DIR` | no | Where uploads wait while being checked, default `storage/tmp` |
+| `MAX_BOOK_FILE_MB` | no | Largest book file an admin can upload, default `50`, max `500` |
 | `DNS_SERVERS` | no | e.g. `8.8.8.8,1.1.1.1`. Only if your network blocks Atlas (`mongodb+srv`) DNS lookups |
 
 The server refuses to start if a required value is missing, and tells you which one.
@@ -54,6 +57,7 @@ The server refuses to start if a required value is missing, and tells you which 
 | `npm start` | Start normally (use this in production) |
 | `npm run seed` | Add or update sample data (safe to re-run) |
 | `npm run seed:fresh` | Delete categories and books, then seed again |
+| `npm run make-admin -- someone@example.com` | Make an existing customer an admin (add `--remove` to undo) |
 
 ## Project structure
 
@@ -78,10 +82,16 @@ server/
 │   │   ├── orders.js        checkout, payment verification, order history
 │   │   ├── payments.js      payment provider webhook
 │   │   ├── library.js       purchased books and download links
-│   │   └── downloads.js     expiring file downloads
+│   │   ├── downloads.js     expiring file downloads
+│   │   ├── admin.js         admin guard, dashboard stats, orders
+│   │   ├── adminBooks.js    add/edit/delete books, upload files and covers
+│   │   └── adminCategories.js  add/edit/delete shelves
 │   ├── payments/            gateway adapters (paystack.js): swap providers here
 │   ├── services/orders.js   turns confirmed payments into owned books
-│   ├── storage/index.js     private book-file storage (swap for S3 later)
+│   ├── storage/
+│   │   ├── index.js         private book-file storage (swap for S3 later)
+│   │   └── fileTypes.js     checks uploads really are PDF/EPUB/JPEG/PNG/WebP
+│   ├── scripts/makeAdmin.js promote a customer to admin
 │   ├── middleware/
 │   │   ├── auth.js          requireAuth / requireAdmin guards
 │   │   └── errorHandler.js  404 + consistent JSON errors
@@ -206,6 +216,36 @@ either key in the client or in Git.
 (`name`, `createCheckout`, `verifyPayment`, `parseWebhook`), register it in `src/payments/index.js`
 and set `PAYMENT_PROVIDER`. Nothing else changes.
 
+## Admin API
+
+Everything under `/api/admin` needs a signed-in **admin** (visitors get 401, customers 403).
+Admins are created with `npm run seed` (from `ADMIN_EMAIL` / `ADMIN_PASSWORD`) or
+`npm run make-admin -- email`. Nobody can promote themselves through the website.
+
+| Request | Purpose |
+|---|---|
+| `GET /api/admin/stats` | Dashboard numbers. Revenue is reported per currency |
+| `GET /api/admin/orders` | Orders, newest first. `?status=` `?page=` |
+| `GET /api/admin/books` | All books including drafts. `?search=` `?status=published\|draft` `?page=` |
+| `GET /api/admin/books/:id` | One book with every field |
+| `POST /api/admin/books` | Create a book. It always starts as a **draft** |
+| `PATCH /api/admin/books/:id` | Change a book (only known fields are accepted) |
+| `DELETE /api/admin/books/:id` | Delete a book nobody has bought |
+| `POST /api/admin/books/:id/file` | Upload the book file (form field `file`, PDF or EPUB) |
+| `POST /api/admin/books/:id/cover` | Upload the cover (form field `cover`, JPEG/PNG/WebP, up to 2 MB) |
+| `POST/PATCH/DELETE /api/admin/categories[/:id]` | Manage shelves |
+
+**Rules that protect customers**
+- A book cannot be published until its file is uploaded, so nobody pays for something they can't receive.
+- A book that has been bought cannot be deleted (unpublish it instead). Owners keep their download
+  even after it is unpublished.
+- A shelf that still holds books cannot be deleted.
+
+**How uploads are checked:** the file's real contents are inspected, not its name or the type the
+browser claims. A renamed program or a script disguised as `.pdf` is rejected. SVG covers are refused
+because they can contain scripts. Book files go to the private folder; only covers are public, and the
+public path can never reach a book file.
+
 ## Book files and downloads
 
 Files live in `STORAGE_DIR` (default `server/storage/books`), a **private** folder that is not served
@@ -213,7 +253,7 @@ publicly and is excluded from Git. A customer downloads by asking for a link, wh
 5 minutes, only for books they own, and is checked again when used.
 
 `npm run seed` creates a small **placeholder PDF** for each sample book so you can test downloads.
-Real files are uploaded through the admin area in step 5. For production, keep this folder on
+Real files are uploaded through the admin area (Books > Edit). For production, keep this folder on
 persistent storage (a mounted disk or volume). Free hosting tiers often wipe local files on every
 deploy, so cloud storage such as S3 or Cloudflare R2 is a better long-term fit: only
 `src/storage/index.js` and `src/routes/downloads.js` would change.

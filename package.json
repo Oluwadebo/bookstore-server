@@ -11,7 +11,8 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "seed": "node src/seed/seed.js",
-    "seed:fresh": "node src/seed/seed.js --fresh"
+    "seed:fresh": "node src/seed/seed.js --fresh",
+    "make-admin": "node src/scripts/makeAdmin.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -24,6 +25,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.0",
     "morgan": "^1.10.0",
+    "multer": "^2.0.0",
     "slugify": "^1.6.6"
   },
   "devDependencies": {

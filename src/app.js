@@ -21,6 +21,7 @@ import orderRoutes from "./routes/orders.js";
 import libraryRoutes from "./routes/library.js";
 import downloadRoutes from "./routes/downloads.js";
 import paymentRoutes from "./routes/payments.js";
+import adminRoutes from "./routes/admin.js";
 
 const app = express();
 
@@ -33,6 +34,18 @@ app.use(helmet());
 // Only the React app may call this API from a browser. `credentials` lets the
 // login cookie travel with requests.
 app.use(cors({ origin: env.clientUrl, credentials: true }));
+
+// Uploaded cover images are public. Everything else in storage/ stays private.
+// "cross-origin" lets the website (on another domain) show them; Helmet blocks that by default.
+app.use(
+  "/api/covers",
+  express.static(env.coversDir, {
+    index: false,
+    dotfiles: "deny",
+    maxAge: "7d", // cover file names change on every upload, so long caching is safe
+    setHeaders: (res) => res.set("Cross-Origin-Resource-Policy", "cross-origin"),
+  })
+);
 
 // Payment webhooks need the RAW request body to verify the provider's signature,
 // so this router is mounted BEFORE express.json() below.
@@ -63,6 +76,7 @@ app.use("/api/cart", cartRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/library", libraryRoutes);
 app.use("/api/downloads", downloadRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.use(notFound);
 app.use(errorHandler);

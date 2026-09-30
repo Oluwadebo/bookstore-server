@@ -6,9 +6,6 @@
  * reading `process.env` directly, so a missing setting fails fast at
  * startup with a clear message rather than deep inside a request.
  */
-import dns from "dns";
-dns.setServers(["8.8.8.8", "8.8.4.4", "1.1.1.1"]);
-dns.setDefaultResultOrder("ipv4first");
 import "dotenv/config";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +51,10 @@ export const env = {
   storeCurrency: (process.env.STORE_CURRENCY || "USD").toUpperCase(),
   // Private folder holding the sellable book files. Never served publicly.
   storageDir: path.resolve(SERVER_ROOT, process.env.STORAGE_DIR || "storage/books"),
+  // Cover images are public (served at /api/covers). Uploads wait in a temp folder until checked.
+  coversDir: path.resolve(SERVER_ROOT, process.env.COVERS_DIR || "storage/covers"),
+  tmpDir: path.resolve(SERVER_ROOT, process.env.TMP_DIR || "storage/tmp"),
+  maxBookFileMb: Math.min(Number(process.env.MAX_BOOK_FILE_MB) || 50, 500),
   adminEmail: process.env.ADMIN_EMAIL,
   adminPassword: process.env.ADMIN_PASSWORD,
 };
