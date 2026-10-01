@@ -225,8 +225,15 @@ and set `PAYMENT_PROVIDER`. Nothing else changes.
 | Role | Can do |
 |---|---|
 | **owner** (exactly one) | Everything. Has the final say. Approves or removes admins, and is the only one who can **delete** books and shelves |
-| **admin** | Add and edit books, upload files and covers, publish/unpublish, manage shelves, view orders |
+| **admin** | Add and edit **their own** books (files, covers, publish/unpublish) and manage **their own** shelves. Sees numbers for their own work only |
 | **user** | Shop, and apply to become an admin |
+
+**Who sees what.** Every book and shelf remembers who created it (`createdBy`). The owner sees and
+manages everything. An admin only sees what they created: someone else's book or shelf answers
+"not found" for every action, so its existence isn't even revealed. Orders, customers and revenue are
+owner-only. Books and shelves that existed before this rule (such as the sample data) belong to the
+owner. When adding a book an admin can still file it on **any** shelf in the store, because shelves are
+shared; they just can't edit shelves they didn't create.
 
 **How someone becomes an admin:** a customer clicks *Apply to be an admin* on their Account page
 (`POST /api/admin-requests`). Nothing is granted by applying. The owner sees the application on the
@@ -250,9 +257,10 @@ Everything under `/api/admin` needs a signed-in **admin or owner** (visitors get
 
 | Request | Purpose |
 |---|---|
-| `GET /api/admin/stats` | Dashboard numbers. Revenue is reported per currency |
-| `GET /api/admin/orders` | Orders, newest first. `?status=` `?page=` |
-| `GET /api/admin/books` | All books including drafts. `?search=` `?status=published\|draft` `?page=` |
+| `GET /api/admin/stats` | Dashboard numbers. Owner: whole store, revenue per currency. Admin: their own books and shelves only |
+| `GET /api/admin/orders` | **Owner only.** Orders, newest first. `?status=` `?page=` |
+| `GET /api/admin/books` | Books you manage (owner: all, admin: only their own), drafts included. `?search=` `?status=published\|draft` `?page=` |
+| `GET /api/admin/categories` | Shelves you manage (owner: all, admin: only their own) |
 | `GET /api/admin/books/:id` | One book with every field |
 | `POST /api/admin/books` | Create a book. It always starts as a **draft** |
 | `PATCH /api/admin/books/:id` | Change a book (only known fields are accepted) |

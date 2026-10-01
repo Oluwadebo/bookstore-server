@@ -2,6 +2,7 @@
  * Shelf (category) management for admins, mounted at /api/admin/categories.
  * The public list lives at GET /api/categories.
  *
+ *   GET    /        the shelves you manage (owner: all; admin: only the ones they created)
  *   POST   /        create a shelf
  *   PATCH  /:id     change a shelf
  *   DELETE /:id     delete an empty shelf (site owner only)
@@ -21,7 +22,7 @@ import { isObjectId, strictText } from "../utils/validate.js";
 const router = Router();
 
 /** Validate the shelf fields from a request. `partial` leaves out missing fields. */
-async function parseCategoryInput(body, { partial, selfId = null }) {
+async function parseCategoryInput(body, { partial, selfId = null, user }) {
   if (typeof body !== "object" || body === null) throw new ApiError(400, "Invalid request");
   const has = (key) => body[key] !== undefined;
   const out = {};
@@ -55,6 +56,8 @@ async function parseCategoryInput(body, { partial, selfId = null }) {
       if (selfId && String(body.parent) === String(selfId)) throw new ApiError(400, "A shelf cannot be inside itself");
       const parent = await Category.findById(body.parent).lean();
       if (!parent) throw new ApiError(400, "Parent shelf not found");
+      // Admins can only nest a shelf inside a shelf of their own.
+      if (user.role !== "owner" && String(parent.createdBy) !== String(user._id)) throw new ApiError(400, "You can only place a shelf inside one of your own shelves");
       // Two levels at most (shelf > sub-shelf) keeps menus simple.
       if (parent.parent) throw new ApiError(400, "Sub-shelves cannot have their own sub-shelves");
       if (selfId && (await Category.exists({ parent: selfId }))) throw new ApiError(400, "This shelf has sub-shelves, so it cannot be placed inside another shelf");
@@ -69,12 +72,31 @@ function friendly(err) {
   return err.code === 11000 ? new ApiError(409, "A shelf with that name already exists") : err;
 }
 
+router.get(
+  "/",
+  asyncHandler(async (req, res) => {
+    // The owner manages every shelf; an admin manages only the ones they created.
+    // (When ADDING a book an admin can still file it on any shelf: that list is the public GET /api/categories.)
+    const filter = req.user.role === "owner" ? {} : { createdBy: req.user._id };
+    const [categories, counts] = await Promise.all([
+      Category.find(filter).sort({ sortOrder: 1, name: 1 }).lean(),
+      Book.aggregate([
+        { $match: { isPublished: true } },
+        { $unwind: "$categories" },
+        { $group: { _id: "$categories", count: { $sum: 1 } } },
+      ]),
+    ]);
+    const countById = new Map(counts.map((row) => [String(row._id), row.count]));
+    res.json({ categories: categories.map((shelf) => ({ ...shelf, bookCount: countById.get(String(shelf._id)) || 0 })) });
+  })
+);
+
 router.post(
   "/",
   asyncHandler(async (req, res) => {
-    const data = await parseCategoryInput(req.body, { partial: false });
+    const data = await parseCategoryInput(req.body, { partial: false, user: req.user });
     try {
-      const category = await Category.create(data);
+      const category = await Category.create({ ...data, createdBy: req.user._id });
       res.status(201).json({ category });
     } catch (err) {
       throw friendly(err);
@@ -86,8 +108,10 @@ router.patch(
   "/:id",
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    if (!isObjectId(id) || !(await Category.exists({ _id: id }))) throw new ApiError(404, "Shelf not found");
-    const data = await parseCategoryInput(req.body, { partial: true, selfId: id });
+    const existing = isObjectId(id) ? await Category.findById(id).lean() : null;
+    // Someone else's shelf answers "not found", like books do.
+    if (!existing || (req.user.role !== "owner" && String(existing.createdBy) !== String(req.user._id))) throw new ApiError(404, "Shelf not found");
+    const data = await parseCategoryInput(req.body, { partial: true, selfId: id, user: req.user });
     try {
       const category = await Category.findByIdAndUpdate(id, { $set: data }, { new: true, runValidators: true });
       res.json({ category });

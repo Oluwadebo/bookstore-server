@@ -24,6 +24,8 @@ const categorySchema = new mongoose.Schema(
     parent: { type: mongoose.Schema.Types.ObjectId, ref: "Category", default: null },
     // Lower numbers appear first in menus.
     sortOrder: { type: Number, default: 0 },
+    // Who created this shelf (see Book.createdBy). No creator means it belongs to the owner.
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
   },
   { timestamps: true }
 );

@@ -9,6 +9,9 @@
  *   POST   /:id/file        upload the sellable file (PDF or EPUB), field name "file"
  *   POST   /:id/cover       upload the cover image (JPEG/PNG/WebP), field name "cover"
  *
+ * Who sees what: the site owner sees and manages every book. A regular admin only sees and
+ * manages the books they added themselves (someone else's book simply doesn't exist for them).
+ *
  * Rules that protect customers:
  *  - A book can only be published once its file is uploaded.
  *  - A book someone has bought cannot be deleted (unpublish it instead), so nobody
@@ -49,9 +52,13 @@ function toAdminBook(book) {
 const plain = (doc) => (doc?.toObject ? doc.toObject() : doc);
 
 /** Load a book (with its private file key) or throw 404. */
-async function loadBook(id) {
+/** Which books a user may manage: the owner sees all, an admin only the ones they added. */
+const ownScope = (user) => (user.role === "owner" ? {} : { createdBy: user._id });
+
+async function loadBook(id, user) {
   const book = isObjectId(id) ? await Book.findById(id).select("+file.storageKey") : null;
-  if (!book) throw new ApiError(404, "Book not found");
+  // Someone else's book answers "not found" (not "forbidden"), so its existence isn't revealed.
+  if (!book || (user.role !== "owner" && String(book.createdBy) !== String(user._id))) throw new ApiError(404, "Book not found");
   return plain(book);
 }
 
@@ -175,7 +182,7 @@ router.get(
     const page = toInt(req.query.page, 1, 1, 10000);
     const limit = toInt(req.query.limit, 20, 1, 100);
 
-    const filter = {};
+    const filter = { ...ownScope(req.user) };
     if (status === "published") filter.isPublished = true;
     if (status === "draft") filter.isPublished = false;
     if (search) {
@@ -194,7 +201,7 @@ router.get(
 router.get(
   "/:id",
   asyncHandler(async (req, res) => {
-    res.json({ book: toAdminBook(await loadBook(req.params.id)) });
+    res.json({ book: toAdminBook(await loadBook(req.params.id, req.user)) });
   })
 );
 
@@ -203,6 +210,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const data = await parseBookInput(req.body, { partial: false });
     data.slug = await uniqueSlug(data.title);
+    data.createdBy = req.user._id; // remembered so an admin only ever sees their own books
     data.isPublished = false; // drafts until a file is uploaded
     const book = await Book.create(data);
     res.status(201).json({ book: toAdminBook(plain(book)) });
@@ -212,7 +220,7 @@ router.post(
 router.patch(
   "/:id",
   asyncHandler(async (req, res) => {
-    const current = await loadBook(req.params.id);
+    const current = await loadBook(req.params.id, req.user);
     const data = await parseBookInput(req.body, { partial: true });
 
     if (data.isPublished === true && !current.file?.storageKey) {
@@ -231,7 +239,7 @@ router.delete(
   "/:id",
   requireOwner, // admins can unpublish; only the owner can delete
   asyncHandler(async (req, res) => {
-    const book = await loadBook(req.params.id);
+    const book = await loadBook(req.params.id, req.user);
 
     const owned = (await User.exists({ library: book._id })) || (await Order.exists({ "items.book": book._id, status: "paid" }));
     if (owned) throw new ApiError(409, "Customers have bought this book, so it cannot be deleted. Unpublish it instead.");
@@ -247,7 +255,7 @@ router.delete(
 router.post(
   "/:id/file",
   asyncHandler(async (req, res) => {
-    const book = await loadBook(req.params.id);
+    const book = await loadBook(req.params.id, req.user);
     await runUpload(bookUpload.single("file"), req, res, env.maxBookFileMb);
     if (!req.file) throw new ApiError(400, "Choose a PDF or EPUB file");
 
@@ -275,7 +283,7 @@ router.post(
 router.post(
   "/:id/cover",
   asyncHandler(async (req, res) => {
-    const book = await loadBook(req.params.id);
+    const book = await loadBook(req.params.id, req.user);
     await runUpload(coverUpload.single("cover"), req, res, MAX_COVER_BYTES / 1024 / 1024);
     if (!req.file) throw new ApiError(400, "Choose an image");
 

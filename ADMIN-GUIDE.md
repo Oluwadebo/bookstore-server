@@ -54,10 +54,15 @@ tick it on the books. It appears across the store automatically. No redesign is 
 
 | | Admin | You (owner) |
 |---|---|---|
-| Add and edit books, upload covers and files, publish or unpublish | Yes | Yes |
-| Add and edit shelves, view orders | Yes | Yes |
+| Add and edit books, upload covers and files, publish or unpublish | Their own books only | All books |
+| Add and edit shelves | Their own shelves only | All shelves |
+| See orders, customers and sales | No | Yes |
 | Delete books and shelves | No | Yes |
 | Approve, decline or remove admins | No | Yes |
+
+An admin only sees the books and shelves **they added themselves**. Everything already in the store when
+they join (and anything you or other admins add) is not visible to them. When they add a book they can
+still put it on any shelf, because shelves are shared with the whole store.
 
 Because you are the owner, you can change or undo anything an admin does (for example, republish a
 book they unpublished). To take someone's access away, go to **Team** and click **Remove access**.
@@ -68,7 +73,7 @@ after the owner signs up. The previous owner becomes a regular admin.
 
 ## Orders and money
 
-**Admin > Orders** lists every purchase: who bought, what, how much, and whether it is *paid*,
+**Admin > Orders** (owner only) lists every purchase: who bought, what, how much, and whether it is *paid*,
 *pending*, *failed* or *refunded*. **Dashboard** shows totals; revenue is shown separately for each
 currency. Payments are received in your Paystack account, so use Paystack's dashboard for payouts and refunds.
 

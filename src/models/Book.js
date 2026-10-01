@@ -41,6 +41,11 @@ const bookSchema = new mongoose.Schema(
       sizeBytes: Number,
     },
 
+    // Who added this book. Regular admins can only see and manage their own books; the owner
+    // sees all. Books with no creator (the sample data, or anything from before this existed)
+    // belong to the owner.
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
+
     isPublished: { type: Boolean, default: true, index: true },
     featured: { type: Boolean, default: false },
   },
