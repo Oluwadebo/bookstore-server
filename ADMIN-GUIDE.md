@@ -13,13 +13,21 @@ You are the **site owner**: you have the final say on everything. See *Your team
 ## Adding a book
 
 1. **Admin > Books > Add book.**
-2. Fill in the title, author(s), description and price. Type the price normally (for example `1500` or `4.99`).
-   Leave *Currency* blank to use the store's currency.
-3. Tick the **shelves** the book belongs to, and add a few **tags** (words people might search for).
-4. Click **Create book.** It is saved as a **draft**, so customers can't see it yet.
-5. On the page that opens, **upload the cover** (JPEG, PNG or WebP, up to 2 MB, portrait shape looks best)
-   and **upload the book file** (PDF or EPUB).
-6. Tick **Published**, then **Save changes.** The book is now in the store.
+2. **Choose the book file** (PDF or EPUB). The store reads the file and fills in what it can find: the title, author,
+   description and, for EPUB files, the **cover**. You'll see a note saying what was found and what wasn't.
+3. Check the details. Set the **price** (type it normally, for example `1500` or `4.99`) and tick the **shelves**
+   (you can use any shelf in the store). Add a few **tags** (words people might search for).
+4. If the file had no cover (PDFs usually don't), **upload a cover** (JPEG, PNG or WebP, up to 2 MB, portrait looks best).
+5. Tick **Published**, then **Save changes.** The book is now in the store.
+
+No file yet? Use *"I don't have the file yet. Enter the details by hand"* on the first screen.
+
+**One book, one listing.** The store refuses a file that is already in the store, even if you give it a different
+title, and it refuses a second book with the same title and author. If you replace a book's file, a pop-up shows the
+title, author, description and cover found in the new file so you can tick what to use. If a book's title doesn't match
+the title inside its file, the edit screen warns you.
+
+**Free books:** if you publish with the price at 0, the store asks you to confirm, so a forgotten price can't give a book away.
 
 Why a file is needed first: a customer who pays must be able to download what they bought, so the
 store won't let you publish a book that has no file.
@@ -38,6 +46,8 @@ store won't let you publish a book that has no file.
 a short description. To start selling non-fiction or educational books, add a shelf with that type, then
 tick it on the books. It appears across the store automatically. No redesign is needed.
 
+Every admin can see **all** shelves, so you can check whether a name already exists before making one. You can only edit the shelves you created; shelves made by others are marked *View only*.
+
 - A shelf can sit **inside** another shelf (for example *Cookery* inside *Non-fiction*).
 - Only the owner can delete shelves, and a shelf that still has books can't be deleted. Move the books first.
 
@@ -55,7 +65,7 @@ tick it on the books. It appears across the store automatically. No redesign is 
 | | Admin | You (owner) |
 |---|---|---|
 | Add and edit books, upload covers and files, publish or unpublish | Their own books only | All books |
-| Add and edit shelves | Their own shelves only | All shelves |
+| Add and edit shelves | Their own only (they can see all) | All shelves |
 | See orders, customers and sales | No | Yes |
 | Delete books and shelves | No | Yes |
 | Approve, decline or remove admins | No | Yes |

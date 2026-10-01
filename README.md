@@ -94,7 +94,8 @@ server/
 │   ├── services/orders.js   turns confirmed payments into owned books
 │   ├── storage/
 │   │   ├── index.js         private book-file storage (swap for S3 later)
-│   │   └── fileTypes.js     checks uploads really are PDF/EPUB/JPEG/PNG/WebP
+│   │   ├── fileTypes.js     checks uploads really are PDF/EPUB/JPEG/PNG/WebP
+│   │   └── bookMetadata.js  reads title/author/description/cover from EPUB and PDF, file fingerprints
 │   ├── scripts/makeAdmin.js promote a customer to admin
 │   ├── middleware/
 │   │   ├── auth.js          requireAuth / requireAdmin guards
@@ -229,11 +230,12 @@ and set `PAYMENT_PROVIDER`. Nothing else changes.
 | **user** | Shop, and apply to become an admin |
 
 **Who sees what.** Every book and shelf remembers who created it (`createdBy`). The owner sees and
-manages everything. An admin only sees what they created: someone else's book or shelf answers
-"not found" for every action, so its existence isn't even revealed. Orders, customers and revenue are
+manages everything. An admin only sees and manages the **books** they created: someone else's book answers
+"not found" for every action, so its existence isn't even revealed. **Shelves are different:** they are public
+on the storefront anyway, so every admin can *see* every shelf (to know a name is already taken), but can only
+*edit* the ones they created. Orders, customers and revenue are
 owner-only. Books and shelves that existed before this rule (such as the sample data) belong to the
-owner. When adding a book an admin can still file it on **any** shelf in the store, because shelves are
-shared; they just can't edit shelves they didn't create.
+owner. When adding a book an admin can file it on **any** shelf in the store.
 
 **How someone becomes an admin:** a customer clicks *Apply to be an admin* on their Account page
 (`POST /api/admin-requests`). Nothing is granted by applying. The owner sees the application on the
@@ -260,7 +262,10 @@ Everything under `/api/admin` needs a signed-in **admin or owner** (visitors get
 | `GET /api/admin/stats` | Dashboard numbers. Owner: whole store, revenue per currency. Admin: their own books and shelves only |
 | `GET /api/admin/orders` | **Owner only.** Orders, newest first. `?status=` `?page=` |
 | `GET /api/admin/books` | Books you manage (owner: all, admin: only their own), drafts included. `?search=` `?status=published\|draft` `?page=` |
-| `GET /api/admin/categories` | Shelves you manage (owner: all, admin: only their own) |
+| `GET /api/admin/categories` | **Every** shelf, each with `canEdit` (owner: all editable; admin: only the ones they created) |
+| `POST /api/admin/books/from-file` | Start a book from its file: reads title, author, description and cover, creates a draft (form field `file`) |
+| `GET /api/admin/books/:id/file-details` | What the stored file itself says (title, author, description, cover preview) |
+| `POST /api/admin/books/:id/apply-file-details` | Copy chosen details (`fields`: title, authors, description, cover) from the file into the book |
 | `GET /api/admin/books/:id` | One book with every field |
 | `POST /api/admin/books` | Create a book. It always starts as a **draft** |
 | `PATCH /api/admin/books/:id` | Change a book (only known fields are accepted) |
@@ -284,6 +289,33 @@ Everything under `/api/admin` needs a signed-in **admin or owner** (visitors get
 browser claims. A renamed program or a script disguised as `.pdf` is rejected. SVG covers are refused
 because they can contain scripts. Book files go to the private folder; only covers are public, and the
 public path can never reach a book file.
+
+## Reading book files, and one book = one listing
+
+When a file is uploaded the server reads what is inside it (`src/storage/bookMetadata.js`):
+
+| | EPUB | PDF |
+|---|---|---|
+| Title, author(s) | yes | only if the PDF's creator filled them in |
+| Description, language, year | yes | description (from the subject line) and year only |
+| Cover image | yes (JPEG/PNG/WebP, up to 2 MB; SVG is ignored) | no, upload the cover separately |
+
+"Add book" starts from the file (`POST /api/admin/books/from-file`): the server reads the file and creates a
+**draft** with whatever it found, and the admin adds the price and shelves. For an existing book, the admin can
+pull the file's own title, author, description or cover into the listing from a pop-up.
+
+**Duplicate protection.** The same book can't be sold twice under different titles. A file is refused if
+- its bytes are identical to a file already in the store (SHA-256 fingerprint), or
+- it is an EPUB with the same built-in identifier as one already in the store (catches a re-zipped copy), or
+- a book with the same title and first author already exists (any capitalisation).
+
+An admin isn't told the name of another admin's unpublished book ("already in the store as another book"); the
+owner, and anyone for a published book, is. The title found inside each file is also remembered, and the edit screen
+warns when a book is sold under a different title than its file. Fingerprints are recorded from now on, so books
+uploaded before this feature (such as the sample data) aren't checked against new uploads.
+
+Reading is defensive: only a few small entries are opened, sizes are capped, nothing is written to disk by a path
+found inside the file, and a damaged file just yields no details instead of an error.
 
 ## Book files and downloads
 

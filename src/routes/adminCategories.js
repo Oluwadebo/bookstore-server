@@ -2,7 +2,7 @@
  * Shelf (category) management for admins, mounted at /api/admin/categories.
  * The public list lives at GET /api/categories.
  *
- *   GET    /        the shelves you manage (owner: all; admin: only the ones they created)
+ *   GET    /        every shelf, each marked canEdit (owner: all; admin: only the ones they created)
  *   POST   /        create a shelf
  *   PATCH  /:id     change a shelf
  *   DELETE /:id     delete an empty shelf (site owner only)
@@ -75,11 +75,12 @@ function friendly(err) {
 router.get(
   "/",
   asyncHandler(async (req, res) => {
-    // The owner manages every shelf; an admin manages only the ones they created.
-    // (When ADDING a book an admin can still file it on any shelf: that list is the public GET /api/categories.)
-    const filter = req.user.role === "owner" ? {} : { createdBy: req.user._id };
+    // Everyone sees EVERY shelf (they are public on the storefront anyway), so an admin can tell
+    // that a name like "Fantasy" is taken before trying to create it. `canEdit` says which ones
+    // they may change: the owner can edit all, an admin only the shelves they created.
+    const owner = req.user.role === "owner";
     const [categories, counts] = await Promise.all([
-      Category.find(filter).sort({ sortOrder: 1, name: 1 }).lean(),
+      Category.find({}).sort({ sortOrder: 1, name: 1 }).lean(),
       Book.aggregate([
         { $match: { isPublished: true } },
         { $unwind: "$categories" },
@@ -87,7 +88,13 @@ router.get(
       ]),
     ]);
     const countById = new Map(counts.map((row) => [String(row._id), row.count]));
-    res.json({ categories: categories.map((shelf) => ({ ...shelf, bookCount: countById.get(String(shelf._id)) || 0 })) });
+    res.json({
+      categories: categories.map(({ createdBy, ...shelf }) => ({
+        ...shelf, // (who created it is not exposed; only whether YOU may edit it)
+        bookCount: countById.get(String(shelf._id)) || 0,
+        canEdit: owner || String(createdBy) === String(req.user._id),
+      })),
+    });
   })
 );
 

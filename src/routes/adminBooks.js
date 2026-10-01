@@ -6,7 +6,11 @@
  *   POST   /                create a book (starts as a draft)
  *   PATCH  /:id             change any of its details
  *   DELETE /:id             delete a book nobody owns (site owner only)
+ *   POST   /from-file       START a book from its file: reads the title, author, description and
+ *                           cover out of the EPUB/PDF and creates a draft (field name "file")
  *   POST   /:id/file        upload the sellable file (PDF or EPUB), field name "file"
+ *   GET    /:id/file-details        what the file itself says (title, author, description, cover)
+ *   POST   /:id/apply-file-details  copy chosen details from the file into the book
  *   POST   /:id/cover       upload the cover image (JPEG/PNG/WebP), field name "cover"
  *
  * Who sees what: the site owner sees and manages every book. A regular admin only sees and
@@ -28,7 +32,8 @@ import { Book } from "../models/Book.js";
 import { Category } from "../models/Category.js";
 import { Order } from "../models/Order.js";
 import { User } from "../models/User.js";
-import { moveFile, removeStoredFile } from "../storage/index.js";
+import { MAX_COVER_BYTES, coverPreview, extractMetadata, sha256File, titleFromFilename } from "../storage/bookMetadata.js";
+import { fileExists, moveFile, removeStoredFile, resolveStoragePath } from "../storage/index.js";
 import { sniffBookFormat, sniffImage } from "../storage/fileTypes.js";
 import { ApiError } from "../utils/ApiError.js";
 import { requireOwner } from "../middleware/auth.js";
@@ -38,7 +43,6 @@ import { cleanString, escapeRegex, isObjectId, strictText, toInt } from "../util
 const router = Router();
 
 const COVER_URL_PREFIX = "/api/covers/";
-const MAX_COVER_BYTES = 2 * 1024 * 1024;
 const randomId = () => crypto.randomBytes(6).toString("hex");
 
 // ---------------------------------------------------------------- helpers
@@ -46,7 +50,7 @@ const randomId = () => crypto.randomBytes(6).toString("hex");
 /** Shape a book for the admin screens: never expose the private storage key. */
 function toAdminBook(book) {
   const { file, ...rest } = book;
-  return { ...rest, hasFile: Boolean(file?.storageKey), fileSizeBytes: file?.sizeBytes ?? null };
+  return { ...rest, hasFile: Boolean(file?.storageKey), fileSizeBytes: file?.sizeBytes ?? null, fileTitle: file?.title ?? null };
 }
 
 const plain = (doc) => (doc?.toObject ? doc.toObject() : doc);
@@ -68,6 +72,51 @@ async function uniqueSlug(title) {
   let slug = base;
   for (let n = 2; await Book.exists({ slug }); n++) slug = `${base}-${n}`;
   return slug;
+}
+
+/** Can this person already see that book? (the owner, its creator, or anyone if it is public) */
+const visibleTo = (book, user) => user.role === "owner" || book.isPublished || String(book.createdBy) === String(user._id);
+
+/**
+ * Refuse a file that is already in the store: the same bytes, or an EPUB with the same built-in
+ * identifier. This is what stops one book being sold under several different titles.
+ */
+async function assertNotDuplicateFile({ sha256, identifier, excludeId, user }) {
+  const same = [{ "file.sha256": sha256 }];
+  if (identifier) same.push({ "file.identifier": identifier });
+  const filter = { $or: same };
+  if (excludeId) filter._id = { $ne: excludeId };
+
+  const duplicate = await Book.findOne(filter).select("title isPublished createdBy").lean();
+  if (duplicate) {
+    // Don't reveal another admin's unpublished book by name.
+    const name = visibleTo(duplicate, user) ? `"${duplicate.title}"` : "another book";
+    throw new ApiError(409, `This file is already in the store as ${name}. The same book can't be sold twice under different titles.`);
+  }
+}
+
+/** Refuse a second book with the same title and (first) author. */
+async function assertNotDuplicateTitle({ title, author, excludeId }) {
+  const filter = { title: new RegExp(`^${escapeRegex(title.trim())}$`, "i"), authors: new RegExp(`^${escapeRegex(author.trim())}$`, "i") };
+  if (excludeId) filter._id = { $ne: excludeId };
+  if (await Book.exists(filter)) throw new ApiError(409, "A book with this title and author is already in the store. The same book can't be sold twice.");
+}
+
+/** What goes in book.file. Optional fields are left out (not set to undefined). */
+const fileRecord = ({ key, size, sha256, found }) => ({
+  storageKey: key,
+  sizeBytes: size,
+  sha256,
+  ...(found.identifier && { identifier: found.identifier }),
+  ...(found.title && { title: found.title }),
+});
+
+/** Save an extracted cover image into the public covers folder and return its URL. */
+async function saveCoverImage(cover) {
+  const name = `cover-${randomId()}.${cover.ext}`;
+  await fs.mkdir(env.coversDir, { recursive: true });
+  await fs.writeFile(path.join(env.coversDir, name), cover.buffer);
+  return `${COVER_URL_PREFIX}${name}`;
 }
 
 /** Accept an array or a comma-separated string; trim, drop empties, enforce limits. */
@@ -198,6 +247,118 @@ router.get(
   })
 );
 
+router.post(
+  "/from-file",
+  asyncHandler(async (req, res) => {
+    await runUpload(bookUpload.single("file"), req, res, env.maxBookFileMb);
+    if (!req.file) throw new ApiError(400, "Choose a PDF or EPUB file");
+
+    try {
+      const format = await sniffBookFormat(req.file.path);
+      if (!format) throw new ApiError(400, "That file is not a valid PDF or EPUB");
+
+      const [sha256, found] = await Promise.all([sha256File(req.file.path), extractMetadata(req.file.path, format)]);
+      await assertNotDuplicateFile({ sha256, identifier: found.identifier, user: req.user });
+
+      // Whatever the file doesn't say, the admin fills in afterwards.
+      const title = found.title || titleFromFilename(req.file.originalname);
+      const authors = found.authors.length > 0 ? found.authors : ["Unknown author"];
+      await assertNotDuplicateTitle({ title, author: authors[0] });
+
+      const slug = await uniqueSlug(title);
+      const key = `${slug}-${randomId()}.${format}`;
+      await fs.mkdir(env.storageDir, { recursive: true });
+      await moveFile(req.file.path, path.join(env.storageDir, key));
+      const coverUrl = found.cover ? await saveCoverImage(found.cover) : "";
+
+      const book = await Book.create({
+        title,
+        slug,
+        authors,
+        description: found.description,
+        priceCents: 0, // the admin sets the price before publishing
+        ...(found.language && { language: found.language }),
+        ...(found.publishedYear && { publishedYear: found.publishedYear }),
+        coverUrl,
+        format,
+        file: fileRecord({ key, size: req.file.size, sha256, found }),
+        isPublished: false, // always a draft until the admin has checked it
+        createdBy: req.user._id,
+      });
+
+      res.status(201).json({
+        book: toAdminBook(plain(book)),
+        // Which details came from the file, so the screen can say what still needs filling in.
+        found: { title: Boolean(found.title), authors: found.authors.length > 0, description: Boolean(found.description), cover: Boolean(found.cover) },
+      });
+    } finally {
+      await fs.rm(req.file.path, { force: true });
+    }
+  })
+);
+
+/** Read the stored file of a book you manage. Throws a clear error if there is none. */
+async function readStoredFile(book) {
+  const fullPath = resolveStoragePath(book.file?.storageKey);
+  if (!fullPath || !(await fileExists(fullPath))) throw new ApiError(400, "This book has no file yet. Upload it first.");
+  return extractMetadata(fullPath, book.format);
+}
+
+router.get(
+  "/:id/file-details",
+  asyncHandler(async (req, res) => {
+    const found = await readStoredFile(await loadBook(req.params.id, req.user));
+    res.json({
+      file: {
+        title: found.title,
+        authors: found.authors,
+        description: found.description,
+        language: found.language,
+        publishedYear: found.publishedYear,
+        hasCover: Boolean(found.cover),
+        coverPreview: coverPreview(found.cover),
+      },
+    });
+  })
+);
+
+const FILE_DETAIL_FIELDS = ["title", "authors", "description", "cover"];
+
+router.post(
+  "/:id/apply-file-details",
+  asyncHandler(async (req, res) => {
+    const book = await loadBook(req.params.id, req.user);
+    const fields = Array.isArray(req.body?.fields) ? [...new Set(req.body.fields)] : [];
+    if (fields.length === 0 || !fields.every((field) => FILE_DETAIL_FIELDS.includes(field))) {
+      throw new ApiError(400, `Choose which details to use: ${FILE_DETAIL_FIELDS.join(", ")}`);
+    }
+
+    const found = await readStoredFile(book);
+    const patch = {};
+    const applied = [];
+    const skipped = []; // asked for, but the file doesn't contain it
+
+    for (const field of fields) {
+      const value = field === "cover" ? found.cover : found[field];
+      const present = field === "authors" ? value.length > 0 : Boolean(value);
+      (present ? applied : skipped).push(field);
+      if (present && field !== "cover") patch[field] = value;
+    }
+
+    if (patch.title || patch.authors) {
+      await assertNotDuplicateTitle({ title: patch.title ?? book.title, author: (patch.authors ?? book.authors)[0], excludeId: book._id });
+    }
+    if (applied.includes("cover")) patch.coverUrl = await saveCoverImage(found.cover);
+
+    if (Object.keys(patch).length > 0) {
+      const updated = plain(await Book.findByIdAndUpdate(book._id, { $set: patch }, { new: true, runValidators: true }));
+      if (patch.coverUrl) await removeLocalCover(book.coverUrl);
+      return res.json({ book: toAdminBook({ ...updated, file: book.file }), applied, skipped });
+    }
+    res.json({ book: toAdminBook(book), applied, skipped });
+  })
+);
+
 router.get(
   "/:id",
   asyncHandler(async (req, res) => {
@@ -209,6 +370,7 @@ router.post(
   "/",
   asyncHandler(async (req, res) => {
     const data = await parseBookInput(req.body, { partial: false });
+    await assertNotDuplicateTitle({ title: data.title, author: data.authors[0] });
     data.slug = await uniqueSlug(data.title);
     data.createdBy = req.user._id; // remembered so an admin only ever sees their own books
     data.isPublished = false; // drafts until a file is uploaded
@@ -222,6 +384,10 @@ router.patch(
   asyncHandler(async (req, res) => {
     const current = await loadBook(req.params.id, req.user);
     const data = await parseBookInput(req.body, { partial: true });
+
+    if (data.title !== undefined || data.authors !== undefined) {
+      await assertNotDuplicateTitle({ title: data.title ?? current.title, author: (data.authors ?? current.authors)[0], excludeId: current._id });
+    }
 
     if (data.isPublished === true && !current.file?.storageKey) {
       throw new ApiError(400, "Upload the book file before publishing, otherwise customers could not receive it");
@@ -263,17 +429,20 @@ router.post(
       const format = await sniffBookFormat(req.file.path);
       if (!format) throw new ApiError(400, "That file is not a valid PDF or EPUB");
 
+      // Fingerprint the file and read what is inside it. The same book can't be sold twice.
+      const [sha256, found] = await Promise.all([sha256File(req.file.path), extractMetadata(req.file.path, format)]);
+      await assertNotDuplicateFile({ sha256, identifier: found.identifier, excludeId: book._id, user: req.user });
+
       const key = `${book.slug}-${randomId()}.${format}`;
       await fs.mkdir(env.storageDir, { recursive: true });
       await moveFile(req.file.path, path.join(env.storageDir, key));
 
-      const updated = plain(
-        await Book.findByIdAndUpdate(book._id, { $set: { format, file: { storageKey: key, sizeBytes: req.file.size } } }, { new: true })
-      );
+      const file = fileRecord({ key, size: req.file.size, sha256, found });
+      const updated = plain(await Book.findByIdAndUpdate(book._id, { $set: { format, file } }, { new: true }));
       // Customers who already own this book get the new file from now on.
       await removeStoredFile(book.file?.storageKey);
 
-      res.json({ book: toAdminBook({ ...updated, file: { storageKey: key, sizeBytes: req.file.size } }) });
+      res.json({ book: toAdminBook({ ...updated, file }) });
     } finally {
       await fs.rm(req.file.path, { force: true }); // no-op once the file was moved
     }

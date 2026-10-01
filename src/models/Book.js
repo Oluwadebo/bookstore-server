@@ -38,6 +38,12 @@ const bookSchema = new mongoose.Schema(
     format: { type: String, enum: ["epub", "pdf"], default: "epub" },
     file: {
       storageKey: { type: String, select: false },
+      // A fingerprint of the file and its built-in identifier (EPUB), used to refuse the same
+      // book being uploaded twice under different titles. Kept private like the storage key.
+      sha256: { type: String, select: false, index: true },
+      identifier: { type: String, select: false, index: true },
+      // The title written inside the file itself, so the admin can spot a mislabelled book.
+      title: String,
       sizeBytes: Number,
     },
 
