@@ -46,7 +46,7 @@ store won't let you publish a book that has no file.
 a short description. To start selling non-fiction or educational books, add a shelf with that type, then
 tick it on the books. It appears across the store automatically. No redesign is needed.
 
-Every admin can see **all** shelves, so you can check whether a name already exists before making one. You can only edit the shelves you created; shelves made by others are marked *View only*.
+**Only the owner creates, edits and deletes shelves.** Every admin can see all shelves (name, type, description and how many books are on each) so they know where their book belongs. If a shelf is missing, an admin clicks **Request a shelf**: the request goes to the owner, who sees a badge on the **Shelves** tab and can **Approve and create** or **Decline** (with a note). A name that already exists, even spelled differently, is refused with a pointer to the existing shelf.
 
 - A shelf can sit **inside** another shelf (for example *Cookery* inside *Non-fiction*).
 - Only the owner can delete shelves, and a shelf that still has books can't be deleted. Move the books first.
@@ -65,8 +65,11 @@ Every admin can see **all** shelves, so you can check whether a name already exi
 | | Admin | You (owner) |
 |---|---|---|
 | Add and edit books, upload covers and files, publish or unpublish | Their own books only | All books |
-| Add and edit shelves | Their own only (they can see all) | All shelves |
-| See orders, customers and sales | No | Yes |
+| See shelves | Yes, all (read-only) | Yes |
+| Create, edit or delete shelves | No (they send a request) | Yes |
+| See their own sales, statements and payouts | Yes (never who bought) | Everyone's |
+| See orders, customers and store-wide revenue | No | Yes |
+| Set the commission, record payouts | No | Yes |
 | Delete books and shelves | No | Yes |
 | Approve, decline or remove admins | No | Yes |
 
@@ -80,6 +83,31 @@ They are locked out immediately.
 
 Handing the store to its owner: the developer runs `npm run make-admin -- owner@email.com --owner`
 after the owner signs up. The previous owner becomes a regular admin.
+
+## Sellers, commission and payouts
+
+Your admins are **sellers**: they upload books, and you take a commission from each sale.
+
+**How one sale is split** (example: a N10,000 book by a seller at 10%):
+- The customer pays the **list price plus a payment processing fee** (about N254 here), shown clearly in their cart. The fee is worked out so that, after Paystack takes its cut, exactly N10,000 is left.
+- You keep **10% of the list price = N1,000**. The seller earns **N9,000**. Payment fees never reduce a seller's money.
+- Books you upload yourself carry no commission: you keep the whole price.
+
+**Admin > Earnings** (owner):
+- **Store commission** is the default percentage. Changing it asks you to confirm and only affects *future* sales; sales already made keep the rate they were sold at.
+- **Set rate** gives one seller their own percentage instead of the default.
+- Each seller shows what they have earned, what has been paid out, and **what you owe them**.
+- **Statement and payouts** opens a seller's monthly statement (view, print or save as PDF, download as a spreadsheet) and lets you **Record a payout**.
+
+**Paying a seller.** Send the money by bank transfer yourself first. Then click **Record a payout**, enter the amount and the transfer reference, and save. This only updates the balance; the app does not send money. You can't record more than is owed, or the same reference twice.
+
+**Payment fee check.** The Earnings screen compares the fees customers were charged with what Paystack actually took. Bank transfers and international cards cost Paystack different amounts, so a small difference is normal: it goes to you, never to the sellers.
+
+**For sellers:** an admin sees **My sales**: their totals, a monthly statement, and the payouts you've recorded. They never see who bought their books.
+
+## If someone forgets their password
+
+On the login page they click **Forgot password?**, enter their email, and receive a link that works once for 30 minutes. After choosing a new password they are signed out of every other device. Whether or not an email has an account, the page gives the same answer, so nobody can use it to check who has an account. The developer must set up an email provider once (see the server README) or the emails won't be sent.
 
 ## Orders and money
 

@@ -2,7 +2,7 @@
  * Shelf (category) management for admins, mounted at /api/admin/categories.
  * The public list lives at GET /api/categories.
  *
- *   GET    /        every shelf, each marked canEdit (owner: all; admin: only the ones they created)
+ *   GET    /        every shelf, with its details (everyone can see them; only the owner can change them)
  *   POST   /        create a shelf
  *   PATCH  /:id     change a shelf
  *   DELETE /:id     delete an empty shelf (site owner only)
@@ -92,7 +92,7 @@ router.get(
       categories: categories.map(({ createdBy, ...shelf }) => ({
         ...shelf, // (who created it is not exposed; only whether YOU may edit it)
         bookCount: countById.get(String(shelf._id)) || 0,
-        canEdit: owner || String(createdBy) === String(req.user._id),
+        canEdit: owner, // only the owner changes shelves; admins ask for new ones via shelf requests
       })),
     });
   })
@@ -100,6 +100,7 @@ router.get(
 
 router.post(
   "/",
+  requireOwner, // only the owner creates shelves. Admins send a request (adminShelfRequests.js)
   asyncHandler(async (req, res) => {
     const data = await parseCategoryInput(req.body, { partial: false, user: req.user });
     try {
@@ -113,6 +114,7 @@ router.post(
 
 router.patch(
   "/:id",
+  requireOwner,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const existing = isObjectId(id) ? await Category.findById(id).lean() : null;

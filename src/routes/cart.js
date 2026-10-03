@@ -15,6 +15,7 @@ import { User } from "../models/User.js";
 import { ApiError } from "../utils/ApiError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { isObjectId } from "../utils/validate.js";
+import { customerFee } from "../services/fees.js";
 import { requireAuth } from "../middleware/auth.js";
 
 const router = Router();
@@ -29,11 +30,17 @@ async function buildCart(user) {
   const items = user.cart.map((id) => byId.get(String(id))).filter(Boolean);
 
   const currencies = [...new Set(items.map((book) => book.currency))];
+  const totalCents = items.reduce((sum, book) => sum + book.priceCents, 0);
+  const currency = currencies.length === 1 ? currencies[0] : null;
+  // The payment processing fee, added on top of the list prices (see services/fees.js).
+  const processingFeeCents = currency ? customerFee({ subtotalMinor: totalCents, currency }) : 0;
   return {
     items,
-    totalCents: items.reduce((sum, book) => sum + book.priceCents, 0),
+    totalCents, // the list prices added up
+    processingFeeCents,
+    payableCents: totalCents + processingFeeCents, // what the customer will be charged
     // A payment can only be in one currency, so a mixed cart cannot be checked out.
-    currency: currencies.length === 1 ? currencies[0] : null,
+    currency,
     mixedCurrencies: currencies.length > 1,
   };
 }

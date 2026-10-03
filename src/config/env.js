@@ -24,6 +24,12 @@ if (process.env.JWT_SECRET.length < 32) {
   process.exit(1);
 }
 
+const COMMISSION = Number(process.env.COMMISSION_PERCENT ?? 10);
+if (!(COMMISSION >= 0 && COMMISSION <= 90)) {
+  console.error("COMMISSION_PERCENT must be between 0 and 90.");
+  process.exit(1);
+}
+
 const SAME_SITE = (process.env.COOKIE_SAMESITE || "lax").toLowerCase();
 if (!["lax", "strict", "none"].includes(SAME_SITE)) {
   console.error('COOKIE_SAMESITE must be "lax", "strict" or "none".');
@@ -44,6 +50,24 @@ export const env = {
   // "lax" works when the site and API share a registrable domain (yourstore.com and
   // api.yourstore.com). Use "none" only if they are on completely different domains.
   cookieSameSite: SAME_SITE,
+  // Marketplace money (admins are sellers). Percentages are kept as basis points (10% = 1000)
+  // so all the arithmetic stays in whole numbers.
+  commissionBps: Math.round(Number(process.env.COMMISSION_PERCENT ?? 10) * 100),
+  // Add the payment provider's fee on top of the list price, so sellers and the store earn on the
+  // LIST price and the customer covers processing. NGN only (see services/fees.js).
+  passFeesToCustomer: (process.env.PASS_FEES_TO_CUSTOMER ?? "true") !== "false",
+  feeBps: Math.round(Number(process.env.FEE_PERCENT ?? 1.5) * 100),
+  feeFixedMinor: Math.round(Number(process.env.FEE_FIXED ?? 100) * 100),
+  feeFixedWaivedBelowMinor: Math.round(Number(process.env.FEE_FIXED_WAIVED_BELOW ?? 2500) * 100),
+  feeCapMinor: Math.round(Number(process.env.FEE_CAP ?? 2000) * 100),
+  // Month boundaries on statements follow the store's clock. Nigeria is UTC+1.
+  utcOffsetHours: Number(process.env.STORE_UTC_OFFSET_HOURS ?? 1),
+
+  // Email (password reset). Any SMTP provider works. Leave SMTP_HOST empty in development
+  // and the reset link is printed in the server console instead.
+  smtp: { host: process.env.SMTP_HOST || "", port: Number(process.env.SMTP_PORT) || 587, user: process.env.SMTP_USER || "", pass: process.env.SMTP_PASS || "" },
+  mailFrom: process.env.MAIL_FROM || "Bookstore <no-reply@example.com>",
+
   // Payments (step 4)
   paymentProvider: (process.env.PAYMENT_PROVIDER || "paystack").toLowerCase(),
   paystackSecretKey: process.env.PAYSTACK_SECRET_KEY || "",

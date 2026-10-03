@@ -28,6 +28,11 @@ export const requireAuth = asyncHandler(async (req, res, next) => {
   const user = await User.findById(payload.sub);
   if (!user) throw new ApiError(401, "Account not found");
 
+  // A password change signs everyone out: a login from before the change stops working.
+  if (user.passwordChangedAt && payload.iat < Math.floor(user.passwordChangedAt.getTime() / 1000)) {
+    throw new ApiError(401, "Your password was changed. Please sign in again");
+  }
+
   req.user = user;
   next();
 });

@@ -9,6 +9,9 @@ import bcrypt from "bcryptjs";
 
 const SALT_ROUNDS = 12;
 
+/** Hash a plain-text password (bcrypt). Used when setting or resetting a password. */
+export const hashPassword = (plainPassword) => bcrypt.hash(plainPassword, SALT_ROUNDS);
+
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: [true, "Name is required"], trim: true, maxlength: 80 },
@@ -28,6 +31,15 @@ const userSchema = new mongoose.Schema(
 
     // Books in the shopper's cart. Digital titles are bought once, so a cart
     // is just a list of book ids (no quantities needed).
+    // A seller's own commission rate in basis points (1000 = 10%). Empty = the store's default.
+    commissionBps: { type: Number, min: 0, max: 9000 },
+
+    // Password reset: only a hash of the emailed token is stored, and it expires.
+    passwordResetHash: { type: String, select: false },
+    passwordResetExpires: { type: Date, select: false },
+    // Sessions created before this moment stop working (a stolen login dies when the password changes).
+    passwordChangedAt: Date,
+
     cart: [{ type: mongoose.Schema.Types.ObjectId, ref: "Book" }],
     // Purchased books ("My Library"), filled in after a verified payment.
     library: [{ type: mongoose.Schema.Types.ObjectId, ref: "Book" }],
@@ -46,7 +58,7 @@ const userSchema = new mongoose.Schema(
 
 /** Hash a plain-text password and store the hash. Call before save(). */
 userSchema.methods.setPassword = async function (plainPassword) {
-  this.passwordHash = await bcrypt.hash(plainPassword, SALT_ROUNDS);
+  this.passwordHash = await hashPassword(plainPassword);
 };
 
 /** Compare a login attempt with the stored hash. Requires .select("+passwordHash"). */

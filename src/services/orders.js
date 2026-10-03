@@ -13,11 +13,11 @@ import { User } from "../models/User.js";
  * Mark a pending order as paid and give the customer their books.
  * Returns true only for the call that actually completed the payment.
  */
-export async function fulfilOrder(orderId) {
+export async function fulfilOrder(orderId, { feesMinor } = {}) {
   // Atomic pending -> paid switch: if two requests race, only one wins.
   const justPaid = await Order.findOneAndUpdate(
     { _id: orderId, status: "pending" },
-    { status: "paid", paidAt: new Date() },
+    { status: "paid", paidAt: new Date(), ...(feesMinor !== undefined && { providerFeeCents: feesMinor }) },
     { new: true }
   );
 
@@ -44,7 +44,7 @@ export async function settleOrder(order, payment) {
       console.error(`Payment mismatch on order ${order._id}: expected ${order.totalCents} ${order.currency}, got ${payment.amountMinor} ${payment.currency}`);
       return false;
     }
-    return fulfilOrder(order._id);
+    return fulfilOrder(order._id, { feesMinor: payment.feesMinor });
   }
   if (payment.status === "failed") {
     await Order.updateOne({ _id: order._id, status: "pending" }, { status: "failed" });

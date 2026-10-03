@@ -16,9 +16,6 @@
  * which is exactly how prices are stored in this app.
  * Docs: https://paystack.com/docs/api/
  */
-import dns from "dns";
-dns.setServers(["8.8.8.8", "8.8.4.4", "1.1.1.1"]);
-dns.setDefaultResultOrder("ipv4first");
 import crypto from "node:crypto";
 import { env } from "../config/env.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -75,6 +72,7 @@ export const paystackProvider = {
       status: data.status === "success" ? "paid" : data.status === "failed" ? "failed" : "pending",
       amountMinor: data.amount,
       currency: data.currency,
+      feesMinor: Number.isInteger(data.fees) ? data.fees : undefined, // what Paystack actually charged
     };
   },
 
@@ -103,6 +101,12 @@ export const paystackProvider = {
     }
     if (event.event !== "charge.success" || !event.data?.reference) return null;
 
-    return { reference: event.data.reference, status: "paid", amountMinor: event.data.amount, currency: event.data.currency };
+    return {
+      reference: event.data.reference,
+      status: "paid",
+      amountMinor: event.data.amount,
+      currency: event.data.currency,
+      feesMinor: Number.isInteger(event.data.fees) ? event.data.fees : undefined,
+    };
   },
 };

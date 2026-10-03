@@ -18,6 +18,9 @@ import { requireAdmin, requireAuth, requireOwner } from "../middleware/auth.js";
 import adminBooks from "./adminBooks.js";
 import adminCategories from "./adminCategories.js";
 import adminTeam from "./adminTeam.js";
+import adminEarnings from "./adminEarnings.js";
+import adminShelfRequests from "./adminShelfRequests.js";
+import { ShelfRequest } from "../models/ShelfRequest.js";
 import { AdminRequest } from "../models/AdminRequest.js";
 
 const router = Router();
@@ -26,6 +29,8 @@ router.use(requireAuth, requireAdmin);
 router.use("/books", adminBooks);
 router.use("/categories", adminCategories);
 router.use("/team", adminTeam);
+router.use("/earnings", adminEarnings);
+router.use("/shelf-requests", adminShelfRequests);
 
 router.get(
   "/stats",
@@ -35,10 +40,10 @@ router.get(
     // applications are the owner's business, so admins get nothing for those.
     const own = isOwner ? {} : { createdBy: req.user._id };
 
-    const [books, published, categories, customers, revenue, pendingAdminRequests] = await Promise.all([
+    const [books, published, categories, customers, revenue, pendingAdminRequests, pendingShelfRequests] = await Promise.all([
       Book.countDocuments(own),
       Book.countDocuments({ ...own, isPublished: true }),
-      Category.countDocuments(own),
+      Category.countDocuments(), // shelves are shared: everyone sees the full count
       isOwner ? User.countDocuments({ role: "user" }) : Promise.resolve(null),
       // Revenue is reported per currency, because amounts in different currencies cannot be added.
       isOwner
@@ -49,6 +54,7 @@ router.get(
           ])
         : Promise.resolve(null),
       isOwner ? AdminRequest.countDocuments({ status: "pending" }) : Promise.resolve(null),
+      isOwner ? ShelfRequest.countDocuments({ status: "pending" }) : Promise.resolve(null),
     ]);
 
     res.json({
@@ -59,6 +65,7 @@ router.get(
       categories,
       customers,
       pendingAdminRequests,
+      pendingShelfRequests,
       revenue: revenue ? revenue.map((row) => ({ currency: row._id, orders: row.orders, revenueCents: row.revenueCents })) : null,
     });
   })

@@ -14,6 +14,9 @@ import rateLimit from "express-rate-limit";
 import { env } from "../config/env.js";
 import { Book } from "../models/Book.js";
 import { Order } from "../models/Order.js";
+import { User } from "../models/User.js";
+import { getDefaultCommissionBps, splitForItem } from "../services/commission.js";
+import { customerFee } from "../services/fees.js";
 import { getProvider } from "../payments/index.js";
 import { fulfilOrder, settleOrder } from "../services/orders.js";
 import { ApiError } from "../utils/ApiError.js";
@@ -40,7 +43,7 @@ router.post(
     const user = req.user;
 
     // Rebuild the order from the database. Books the customer already owns are skipped.
-    const books = await Book.find({ _id: { $in: user.cart }, isPublished: true }).select("title priceCents currency").lean();
+    const books = await Book.find({ _id: { $in: user.cart }, isPublished: true }).select("title priceCents currency createdBy").lean();
     const owned = new Set(user.library.map(String));
     const items = books.filter((book) => !owned.has(String(book._id)));
 
@@ -52,14 +55,30 @@ router.post(
     }
 
     const currency = items[0].currency;
-    const totalCents = items.reduce((sum, book) => sum + book.priceCents, 0);
+    const subtotalCents = items.reduce((sum, book) => sum + book.priceCents, 0);
+    // The payment fee is added on top of the list price (see services/fees.js).
+    const processingFeeCents = customerFee({ subtotalMinor: subtotalCents, currency });
+    const totalCents = subtotalCents + processingFeeCents;
     const isFree = totalCents === 0;
+
+    // Who sold each book and how the money splits, frozen on the order now.
+    const creatorIds = [...new Set(items.map((book) => book.createdBy).filter(Boolean).map(String))];
+    const creators = creatorIds.length ? await User.find({ _id: { $in: creatorIds } }).select("role commissionBps").lean() : [];
+    const creatorById = new Map(creators.map((creator) => [String(creator._id), creator]));
+    const defaultBps = await getDefaultCommissionBps();
     // Look up the provider first so an unconfigured store fails before an order is created.
     const provider = isFree ? null : getProvider();
 
     const order = await Order.create({
       user: user._id,
-      items: items.map((book) => ({ book: book._id, title: book.title, priceCents: book.priceCents })),
+      items: items.map((book) => ({
+        book: book._id,
+        title: book.title,
+        priceCents: book.priceCents,
+        ...splitForItem({ priceCents: book.priceCents, creator: creatorById.get(String(book.createdBy)), defaultBps }),
+      })),
+      subtotalCents,
+      processingFeeCents,
       totalCents,
       currency,
       provider: isFree ? "free" : provider.name,

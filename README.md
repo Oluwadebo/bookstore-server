@@ -3,9 +3,9 @@
 REST API for the online bookstore, built with **Node.js, Express and MongoDB (Mongoose)**.
 It serves the catalogue, accounts, cart, and payments to the React app in `../client`.
 
-> **Status:** Step 5 of 6 - everything a customer needs (catalogue, cart, Paystack checkout, library)
-> plus the admin area (books, files, shelves, orders) with a site owner who approves other admins.
-> Final polish and hand-off come next.
+> **Status:** Step 5 of 6 - everything a customer needs (catalogue, cart, Paystack checkout, library, password
+> reset) plus a marketplace admin area: sellers upload books, the owner takes a commission, and earnings,
+> statements and payouts are tracked. Final polish and hand-off come next.
 
 ## Requirements
 
@@ -46,6 +46,11 @@ Set these in `.env` (never commit that file). `.env.example` lists every option.
 | `COVERS_DIR` | no | Public cover images, default `storage/covers` (served at `/api/covers`) |
 | `TMP_DIR` | no | Where uploads wait while being checked, default `storage/tmp` |
 | `MAX_BOOK_FILE_MB` | no | Largest book file an admin can upload, default `50`, max `500` |
+| `COMMISSION_PERCENT` | no | The store's starting cut of each seller's list price, default `10`. Changed later in Admin > Earnings |
+| `PASS_FEES_TO_CUSTOMER` | no | `true` (default): the payment fee is added on top of the price (Naira only) |
+| `FEE_PERCENT`, `FEE_FIXED`, `FEE_FIXED_WAIVED_BELOW`, `FEE_CAP` | no | Paystack's local-card pricing used to work out that fee (defaults 1.5, 100, 2500, 2000 Naira) |
+| `STORE_UTC_OFFSET_HOURS` | no | Statement months follow this clock, default `1` (Nigeria) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | for password reset in production | Any SMTP provider. Leave `SMTP_HOST` empty in development and the reset link prints in the server console |
 | `DNS_SERVERS` | no | e.g. `8.8.8.8,1.1.1.1`. Only if your network blocks Atlas (`mongodb+srv`) DNS lookups |
 
 The server refuses to start if a required value is missing, and tells you which one.
@@ -75,7 +80,10 @@ server/
 │   │   ├── Book.js          digital titles, price in cents, text search index
 │   │   ├── User.js          customers and admins, hashed passwords, cart, library
 │   │   ├── Order.js         checkout records and payment status
-│   │   └── AdminRequest.js  applications to become an admin
+│   │   ├── AdminRequest.js  applications to become an admin
+│   │   ├── ShelfRequest.js  admins asking the owner for a new shelf
+│   │   ├── Payout.js        record of money paid to a seller
+│   │   └── Setting.js       owner-editable settings (default commission)
 │   ├── routes/
 │   │   ├── auth.js          signup, login, logout, me
 │   │   ├── books.js         browse, keyword search, book detail
@@ -89,9 +97,16 @@ server/
 │   │   ├── adminBooks.js    add/edit/delete books, upload files and covers
 │   │   ├── adminCategories.js  add/edit/delete shelves
 │   │   ├── adminTeam.js     owner-only: approve/decline applications, remove admins
-│   │   └── adminRequests.js customers apply to become an admin
+│   │   ├── adminRequests.js customers apply to become an admin
+│   │   ├── adminShelfRequests.js  admins request shelves, the owner decides
+│   │   └── adminEarnings.js sales, statements, payouts, commission settings
 │   ├── payments/            gateway adapters (paystack.js): swap providers here
-│   ├── services/orders.js   turns confirmed payments into owned books
+│   ├── services/
+│   │   ├── orders.js        turns confirmed payments into owned books
+│   │   ├── fees.js          the payment fee added on top of the price
+│   │   ├── commission.js    the store's cut and each order line's split
+│   │   ├── mailer.js        sends email (SMTP)
+│   │   └── emails.js        the wording of the emails
 │   ├── storage/
 │   │   ├── index.js         private book-file storage (swap for S3 later)
 │   │   ├── fileTypes.js     checks uploads really are PDF/EPUB/JPEG/PNG/WebP
@@ -226,16 +241,16 @@ and set `PAYMENT_PROVIDER`. Nothing else changes.
 | Role | Can do |
 |---|---|
 | **owner** (exactly one) | Everything. Has the final say. Approves or removes admins, and is the only one who can **delete** books and shelves |
-| **admin** | Add and edit **their own** books (files, covers, publish/unpublish) and manage **their own** shelves. Sees numbers for their own work only |
+| **admin** (a seller) | Add and edit **their own** books (files, covers, publish/unpublish). See every shelf (read-only) and request new ones. See their own sales, statements and payouts |
 | **user** | Shop, and apply to become an admin |
 
-**Who sees what.** Every book and shelf remembers who created it (`createdBy`). The owner sees and
-manages everything. An admin only sees and manages the **books** they created: someone else's book answers
-"not found" for every action, so its existence isn't even revealed. **Shelves are different:** they are public
-on the storefront anyway, so every admin can *see* every shelf (to know a name is already taken), but can only
-*edit* the ones they created. Orders, customers and revenue are
-owner-only. Books and shelves that existed before this rule (such as the sample data) belong to the
-owner. When adding a book an admin can file it on **any** shelf in the store.
+**Who sees what.** Every book remembers who created it (`createdBy`). The owner sees and manages everything.
+An admin only sees and manages the **books** they created: someone else's book answers "not found" for every
+action, so its existence isn't even revealed. **Shelves** are public on the storefront anyway, so every admin
+can see every shelf with its details (to know what exists and which fits their book), but **only the owner
+creates, edits and deletes shelves**; an admin asks for a new one with a shelf request. Orders, customers and
+store-wide revenue are owner-only; a seller sees only their own sales (never who bought). Books that existed
+before this rule (such as the sample data) belong to the owner.
 
 **How someone becomes an admin:** a customer clicks *Apply to be an admin* on their Account page
 (`POST /api/admin-requests`). Nothing is granted by applying. The owner sees the application on the
@@ -262,7 +277,14 @@ Everything under `/api/admin` needs a signed-in **admin or owner** (visitors get
 | `GET /api/admin/stats` | Dashboard numbers. Owner: whole store, revenue per currency. Admin: their own books and shelves only |
 | `GET /api/admin/orders` | **Owner only.** Orders, newest first. `?status=` `?page=` |
 | `GET /api/admin/books` | Books you manage (owner: all, admin: only their own), drafts included. `?search=` `?status=published\|draft` `?page=` |
-| `GET /api/admin/categories` | **Every** shelf, each with `canEdit` (owner: all editable; admin: only the ones they created) |
+| `GET /api/admin/categories` | **Every** shelf with its details. `canEdit` is true only for the owner |
+| `GET/POST /api/admin/shelf-requests`, `DELETE .../:id` | Admins ask for a shelf, list their requests, withdraw. The owner gets the queue |
+| `POST /api/admin/shelf-requests/:id/approve` or `/reject` | **Owner only.** Approving creates the shelf |
+| `GET /api/admin/earnings/summary` | Owner: every seller, commission income, fee reconciliation. Admin: just themselves |
+| `GET /api/admin/earnings/sales`, `/statement`, `/payouts` | A seller's totals, a month's statement (`?month=2026-10`, add `&format=csv`), payout history. Owner adds `?seller=` |
+| `POST /api/admin/earnings/payouts` | **Owner only.** Record a payout |
+| `PUT /api/admin/earnings/settings`, `PATCH /api/admin/earnings/sellers/:id` | **Owner only.** Default commission; one seller's own rate |
+| `POST /api/auth/forgot-password`, `/api/auth/reset-password` | Password reset (public) |
 | `POST /api/admin/books/from-file` | Start a book from its file: reads title, author, description and cover, creates a draft (form field `file`) |
 | `GET /api/admin/books/:id/file-details` | What the stored file itself says (title, author, description, cover preview) |
 | `POST /api/admin/books/:id/apply-file-details` | Copy chosen details (`fields`: title, authors, description, cover) from the file into the book |
@@ -272,7 +294,7 @@ Everything under `/api/admin` needs a signed-in **admin or owner** (visitors get
 | `DELETE /api/admin/books/:id` | Delete a book nobody has bought |
 | `POST /api/admin/books/:id/file` | Upload the book file (form field `file`, PDF or EPUB) |
 | `POST /api/admin/books/:id/cover` | Upload the cover (form field `cover`, JPEG/PNG/WebP, up to 2 MB) |
-| `POST/PATCH /api/admin/categories[/:id]` | Add and edit shelves |
+| `POST/PATCH /api/admin/categories[/:id]` | **Owner only.** Add and edit shelves |
 | `DELETE /api/admin/books/:id`, `DELETE /api/admin/categories/:id` | **Owner only** |
 | `GET /api/admin/team` | **Owner only.** Pending applications, the team, recent decisions |
 | `POST /api/admin/team/requests/:id/approve` or `/reject` | **Owner only** |
@@ -289,6 +311,64 @@ Everything under `/api/admin` needs a signed-in **admin or owner** (visitors get
 browser claims. A renamed program or a script disguised as `.pdf` is rejected. SVG covers are refused
 because they can contain scripts. Book files go to the private folder; only covers are public, and the
 public path can never reach a book file.
+
+## Money: price, fee, commission, earnings and payouts
+
+Admins are **sellers**. This is how one sale is split, with a worked example for a N10,000 book by a seller at
+the default 10% commission:
+
+1. **List price: N10,000.** The price on the book.
+2. **Payment fee on top: about N254.** Paystack charges roughly 1.5% + N100 (the N100 is waived under N2,500, and
+   the fee is capped at N2,000). The server works this out *backwards* (`src/services/fees.js`) so that after
+   Paystack takes its cut, exactly the list price is left. The customer pays **N10,254**. This is tested
+   against Paystack's pricing across 20,000 amounts: the customer is never charged a naira more than needed and
+   the store is never short.
+3. **Commission: N1,000** = 10% of the *list price* (never of the fee). The store keeps it.
+4. **Seller earns: N9,000.**
+
+The split is frozen on each order line at the moment of purchase (`seller`, `commissionBps`, `commissionCents`,
+`sellerShareCents`), so changing the rate later never rewrites history. The owner's own books carry no seller, so
+the owner keeps the whole price. The rate is the store default (Admin > Earnings, starting from `COMMISSION_PERCENT`),
+or a seller's own rate.
+
+**Earnings and payouts.** A seller's *balance* is what they earned (from paid orders) minus the payouts the owner
+has recorded. A payout is a **ledger entry**: the owner makes the bank transfer, then records the amount and the
+transfer reference. The server refuses a payout larger than the balance and the same bank reference twice. Pending
+and refunded orders are not counted. Monthly **statements** show every sale, the store's commission, payouts,
+and opening and closing balances (months follow `STORE_UTC_OFFSET_HOURS`), and download as CSV. In the CSV, any
+text that looks like a spreadsheet formula (a book titled `=SUM(1)`) is defused with a leading apostrophe.
+
+**Limits worth knowing.**
+- The fee model covers *local cards in Naira*. Bank transfers, USSD and international cards cost different
+  amounts, so on those the real fee can be higher or lower. The difference belongs to the store, never the
+  seller: the real fee Paystack took is saved on each order and Admin > Earnings compares it with what customers
+  were charged. For currencies other than NGN no fee is added.
+- Sales are totalled in code from the orders. That's fine for a store with thousands of orders; at tens of
+  thousands, move the totals into database aggregation.
+- Payouts are not automatic. Paystack **split payments** (sub-accounts) can send each seller's share
+  automatically, but it needs sellers' bank details and a verification flow, so it's a separate step.
+- Refunds: orders marked `refunded` are excluded from earnings. If a seller was already paid, their balance will
+  go negative, which is the owner's cue to settle it.
+
+## Shelf requests
+
+Only the owner creates shelves. An admin sees all shelves (name, type, colour, description, book count) and, if
+one is missing, sends a request (`name`, `type`, what goes on it, why). Near-duplicates ("Sci Fi" vs "Sci-Fi") of an
+existing or already-requested shelf are refused with a pointer to the existing one. The owner approves (which
+creates the shelf, with a chosen colour) or declines with a note. Limits: 5 waiting requests per admin, 10 per hour.
+
+## Password reset
+
+`POST /api/auth/forgot-password` always answers the same way, whether or not the email has an account, so it can't
+be used to find out who has an account. If one exists, a one-time link (valid 30 minutes) is emailed; only a hash
+of the token is stored. `POST /api/auth/reset-password` sets the new password, uses the link up, and **signs out
+every other device** (sessions from before the change stop working). A second request within a minute sends nothing
+new, and attempts are limited to 8 per hour per IP.
+
+**Email setup.** Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` and `MAIL_FROM` to any SMTP provider
+(Brevo, Resend, Mailgun, Zoho, your host's mail...). In development leave `SMTP_HOST` empty: the email, including
+the link, prints in the server console. In production with no SMTP nothing is sent and the link is never logged.
+Use a sender address on your own domain and set up its SPF/DKIM records, or reset emails will land in spam.
 
 ## Reading book files, and one book = one listing
 
@@ -318,6 +398,10 @@ Reading is defensive: only a few small entries are opened, sizes are capped, not
 found inside the file, and a damaged file just yields no details instead of an error.
 
 ## Book files and downloads
+
+**What is stored where.** MongoDB stores only *information about* a file (its name, size, fingerprint, the book it
+belongs to), never the file itself. Putting book files inside the database (GridFS) is possible but slows queries,
+bloats backups and costs more than file storage. The files themselves go on disk, as described below.
 
 Files live in `STORAGE_DIR` (default `server/storage/books`), a **private** folder that is not served
 publicly and is excluded from Git. A customer downloads by asking for a link, which works for
